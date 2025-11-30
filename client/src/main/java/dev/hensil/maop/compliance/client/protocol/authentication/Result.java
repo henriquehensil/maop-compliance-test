@@ -124,6 +124,7 @@ public sealed class Result permits Approved, Disapproved {
     public @NotNull Version getVersion() {
         return version;
     }
+
     public @NotNull String getVendor() {
         return vendor;
     }
@@ -233,6 +234,7 @@ public sealed class Result permits Approved, Disapproved {
         if (!(object instanceof Result result)) return false;
         return isApproved() == result.isApproved() && Objects.equals(getVersion(), result.getVersion()) && Objects.equals(getVendor(), result.getVendor());
     }
+
     @Override
     public int hashCode() {
         return Objects.hash(isApproved(), getVersion(), getVendor());

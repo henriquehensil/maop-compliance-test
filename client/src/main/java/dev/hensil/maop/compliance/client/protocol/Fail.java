@@ -43,6 +43,7 @@ public final class Fail {
 
         INVALID_FORMAT((short) 0),
         UNAUTHORIZED((short) 1),
+        INVALID_HEADER((short) 3),
         PAYLOAD_LENGTH_MISMATCH((short) 4),
         TIMEOUT((short) 5),
         ORDER_VIOLATION((short) 7),
