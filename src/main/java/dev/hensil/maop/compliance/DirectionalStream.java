@@ -38,6 +38,11 @@ public abstract class DirectionalStream implements Closeable {
     // Native
 
     @Override
+    public @NotNull String toString() {
+        return stream.toString();
+    }
+
+    @Override
     @MustBeInvokedByOverriders
     public boolean equals(@Nullable Object o) {
         if (!(o instanceof DirectionalStream that)) return false;
