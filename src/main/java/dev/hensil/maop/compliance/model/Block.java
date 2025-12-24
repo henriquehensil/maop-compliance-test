@@ -2,6 +2,8 @@ package dev.hensil.maop.compliance.model;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.nio.ByteBuffer;
+
 public final class Block extends Operation {
 
     private final long payload;
@@ -19,5 +21,13 @@ public final class Block extends Operation {
 
     public byte @NotNull [] getBytes() {
         return bytes;
+    }
+
+    @Override
+    public byte @NotNull [] toBytes() {
+        return ByteBuffer.allocate(8 + bytes.length)
+                .putLong(payload)
+                .put(bytes)
+                .array();
     }
 }

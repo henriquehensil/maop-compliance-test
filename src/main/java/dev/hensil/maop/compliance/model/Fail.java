@@ -2,6 +2,7 @@ package dev.hensil.maop.compliance.model;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 public final class Fail extends Operation {
@@ -41,5 +42,15 @@ public final class Fail extends Operation {
 
     public byte @NotNull [] getReason() {
         return reason;
+    }
+
+    @Override
+    public byte @NotNull [] toBytes() {
+        return ByteBuffer.allocate(8 + 2 + 2 + reason.length)
+                .putLong(stream)
+                .putShort(error)
+                .putShort(reasonLen)
+                .put(reason)
+                .array();
     }
 }

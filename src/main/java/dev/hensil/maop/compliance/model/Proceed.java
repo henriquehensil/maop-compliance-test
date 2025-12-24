@@ -2,6 +2,7 @@ package dev.hensil.maop.compliance.model;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 public final class Proceed extends Operation {
@@ -22,6 +23,17 @@ public final class Proceed extends Operation {
         return "Proceed{" +
                 "entries=" + Arrays.toString(entries) +
                 '}';
+    }
+
+    @Override
+    public byte @NotNull [] toBytes() {
+        @NotNull ByteBuffer buffer = ByteBuffer.allocate(entries.length * 8);
+
+        for (@NotNull Entry entry : entries) {
+            buffer.putLong(entry.stream);
+        }
+
+        return buffer.array();
     }
 
     // Classes

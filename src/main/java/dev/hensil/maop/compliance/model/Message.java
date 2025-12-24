@@ -1,5 +1,9 @@
 package dev.hensil.maop.compliance.model;
 
+import org.jetbrains.annotations.NotNull;
+
+import java.nio.ByteBuffer;
+
 public final class Message extends Operation {
 
     private final short msgId;
@@ -23,5 +27,14 @@ public final class Message extends Operation {
 
     public byte getPriority() {
         return priority;
+    }
+
+    @Override
+    public byte @NotNull [] toBytes() {
+        return ByteBuffer.allocate(2 + 8 + 1)
+                .putShort(msgId)
+                .putLong(payload)
+                .put(priority)
+                .array();
     }
 }

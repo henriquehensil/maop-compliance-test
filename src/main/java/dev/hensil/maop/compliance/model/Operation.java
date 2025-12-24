@@ -27,6 +27,11 @@ public abstract sealed class Operation
     // Native
 
     @Override
+    public @NotNull String toString() {
+        return getClass().getSimpleName();
+    }
+
+    @Override
     public final boolean equals(@Nullable Object o) {
         return super.equals(o);
     }

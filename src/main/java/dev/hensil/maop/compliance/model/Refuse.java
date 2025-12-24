@@ -2,6 +2,8 @@ package dev.hensil.maop.compliance.model;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.nio.ByteBuffer;
+
 public final class Refuse extends Operation {
 
     private final @NotNull Entry @NotNull [] entries;
@@ -13,6 +15,19 @@ public final class Refuse extends Operation {
 
     public @NotNull Entry @NotNull [] getEntries() {
         return entries;
+    }
+
+    @Override
+    public byte @NotNull [] toBytes() {
+        @NotNull ByteBuffer buffer = ByteBuffer.allocate(entries.length * (8 + 4 + 2));
+
+        for (@NotNull Entry entry : entries) {
+            buffer.putLong(entry.stream)
+                    .putInt(entry.retryAfter)
+                    .putShort(entry.errorCode);
+        }
+
+        return buffer.array();
     }
 
     // Classes
