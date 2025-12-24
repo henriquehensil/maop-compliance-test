@@ -1,11 +1,8 @@
 package dev.hensil.maop.compliance;
 
 import com.jlogm.Logger;
-import com.jlogm.context.LogCtx;
-import com.jlogm.context.Stack;
 
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
-import dev.hensil.maop.compliance.exception.GlobalOperationManagerException;
 import dev.hensil.maop.compliance.model.Operation;
 
 import org.jetbrains.annotations.NotNull;
@@ -15,23 +12,28 @@ import tech.kwik.core.QuicConnection;
 import tech.kwik.core.StreamReadListener;
 import tech.kwik.core.stream.QuicStreamImpl;
 
+import java.io.ByteArrayInputStream;
 import java.io.Closeable;
+import java.io.DataInputStream;
 import java.io.IOException;
 
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Connection implements Closeable {
 
     // Static initializers
 
-    public static @NotNull Logger logStream = Logger.create("Global Stream");
-    public static @NotNull Logger log = Logger.create("Connection");
+    private static final @NotNull Logger logStream = Logger.create("Global Stream");
+    private static final @NotNull Logger log = Logger.create("Connection");
 
-    private static final int GLOBAL_STREAM_LIMIT = 2;
-    private static final int STREAM_CREATED_BY_PEER_LIMIT = 4;
+    static final int GLOBAL_STREAM_LIMIT = 2;
+    static final int STREAM_CREATED_BY_PEER_LIMIT = 3;
 
     // Objects
 
@@ -40,12 +42,14 @@ public class Connection implements Closeable {
     private final @NotNull QuicConnection connection;
     private final @NotNull GlobalOperationsManager manager = new GlobalOperationsManager();
     private final @NotNull Map<Class<? extends DirectionalStream>, Set<DirectionalStream>> streams = new ConcurrentHashMap<>(3, 1f) {{
-        this.put(BidirectionalStream.class, new HashSet<>(16, 1f));
-        this.put(UnidirectionalOutputStream.class, new HashSet<>(16, 1f));
-        this.put(UnidirectionalInputStream.class, new HashSet<>(16, 1f));
+        this.put(BidirectionalStream.class, ConcurrentHashMap.newKeySet(16));
+        this.put(UnidirectionalOutputStream.class, ConcurrentHashMap.newKeySet(16));
+        this.put(UnidirectionalInputStream.class, ConcurrentHashMap.newKeySet(16));
     }};
 
-    private int streamCreateCount = 0;
+    private final @NotNull AtomicInteger streamCreateCount = new AtomicInteger(0);
+    private final @NotNull CompletableFuture<Void> limitFuture = new CompletableFuture<>();
+
     private volatile boolean closing = false;
 
     // Constructor
@@ -54,6 +58,16 @@ public class Connection implements Closeable {
         this.connection = connection;
         this.compliance = compliance;
         connection.setStreamReadListener(getReadListener());
+
+        this.limitFuture.whenComplete((v, error) -> {
+            if (error == null) {
+                log.warn("The limit was exceeded. Preparing to stop diagnostics...");
+            } else {
+                log.warn("The limit was exceeded ( " + error.getMessage() + ") Preparing to stop diagnostics");
+            }
+
+            this.compliance.stop();
+        });
     }
 
     // Getters
@@ -97,161 +111,246 @@ public class Connection implements Closeable {
     }
 
     protected @NotNull StreamReadListener getReadListener() {
-        return (qs, l) -> this.compliance.getExecutor().execute(() -> {
-            @NotNull QuicStreamImpl quicStream;
-            if (!(qs instanceof QuicStreamImpl)) {
-                throw new AssertionError("Internal error");
-            }
-
-            quicStream = (QuicStreamImpl) qs;
-            if (quicStream.isSelfInitiated()) {
+        return (qs, length) -> {
+            if (!(qs instanceof QuicStreamImpl quicStream)) {
                 return;
             }
 
-            try (
-                    @NotNull LogCtx.Scope ctx = LogCtx.builder()
-                            .put("stream id", quicStream.getStreamId())
-                            .put("bidirectional", quicStream.isBidirectional())
-                            .install();
+            if (quicStream.isSelfInitiated()) return;
 
-                    @NotNull Stack.Scope scope = Stack.pushScope("Validation");
-            ) {
-                if (quicStream.isUnidirectional()) {
-                    log.info("A unidirectional connection was created remotely in vain. Increasing the counter.");
+            log.info("New incoming stream: " + quicStream);
 
-                    try {
-                        quicStream.getInputStream().close();
-                    } catch (IOException e) {
-                        log.warn().cause(e).log("Cannot close this connection: " + this + " Ignoring...");
-                    }
+            if (isLimitExceeded()) { // reject
+                log.severe("Stream limit exceeded. Rejecting stream: " + quicStream);
 
-                    this.streamCreateCount++;
+                try {
+                    quicStream.getInputStream().close();
+                } catch (IOException ignore) {}
+
+                try {
+                    quicStream.getOutputStream().close();
+                } catch (IOException ignore) {}
+
+                this.limitFuture.complete(null);
+
+                return;
+            }
+
+            if (quicStream.isUnidirectional()) { // Reject
+                log.warn("Illegal unidirectional stream created by peer: " + quicStream);
+
+                streamCreateCount.incrementAndGet();
+
+                log.debug("Stream count by connection ( " + this + " ) : " + streamCreateCount.get());
+
+                try {
+                    quicStream.getInputStream().close();
+                } catch (IOException e) {
+                    log.trace("Failed to close illegal unidirectional stream: " + e);
                 }
 
-                if (quicStream.isBidirectional()) {
-                    log.warn("A new bidirectional Stream was created remotely");
+                return;
+            }
 
-                    final @NotNull BidirectionalStream stream = new BidirectionalStream(this, quicStream);
-                    this.streams.get(BidirectionalStream.class).add(stream);
+            // Is a Bidirectional
+            @Nullable BidirectionalStream bidirectionalStream = getDirectionalStream(BidirectionalStream.class, quicStream.getStreamId());
+            @Nullable GlobalStream globalStream = null;
+            boolean isNewbie = !(bidirectionalStream instanceof GlobalStream);
 
-                    boolean isLimitExceeded = streamCreateCount >= STREAM_CREATED_BY_PEER_LIMIT || this.streams.get(BidirectionalStream.class).size() >= GLOBAL_STREAM_LIMIT;
+            try {
+                if (!isNewbie) {
+                    globalStream = (GlobalStream) bidirectionalStream;
 
-                    if (isLimitExceeded) {
-                        log.severe("The limit for creating any stream content has been exceeded. Closing connection" + this);
-
+                    if (globalStream.hasPendingOperation()) {
                         try {
-                            quicStream.getInputStream().close();
-                            quicStream.getOutputStream().close();
-                        } catch (IOException ignore) {
-                            // ignore
+                            byte @NotNull [] bytes = new byte[Math.toIntExact(length)];
+                            int read = globalStream.read(bytes);
+                            if (read < bytes.length) {
+                                bytes = Arrays.copyOf(bytes, read);
+                            }
+
+                            globalStream.fill(bytes);
+                            if (globalStream.remaining() == 0) { // Finished
+                                @Nullable OperationUtils utils = globalStream.getPendingOperation();
+                                if (utils == null) {
+                                    throw new AssertionError("Internal error");
+                                }
+
+                                @NotNull Operation operation = utils.readOperation(new DataInputStream(new ByteArrayInputStream(bytes)));
+                                logStream.trace("New operation read on bidirectional stream (" + quicStream + ") : " + operation);
+
+                                utils.globalHandle(operation, this);
+                                globalStream.setAsNonPendingOperation();
+                            }
+
+                            return;
+                        } catch (ArithmeticException e) {
+                            logStream.severe("An internal error occurred: Global stream is out of control.");
+
+                            try {
+                                globalStream.close();
+                            } catch (IOException ignore) {}
+
+                            shutdown();
+                        }
+                    }
+                }
+
+                if (isNewbie) {
+                    if (bidirectionalStream == null) {
+                        bidirectionalStream = new BidirectionalStream(this, quicStream);
+                        boolean added = streams.get(BidirectionalStream.class).add(bidirectionalStream);
+                        if (!added) {
+                            throw new AssertionError("Internal error");
                         }
 
-                        try {
-                            this.close();
-                        } catch (IOException e) {
-                            log.warn().cause(e).log("Cannot close this connection: " + this + " Ignoring...");
-                        }
+                        log.debug("Number of bidirectional and potential global streams by the connection ( " + this + " ) : " + this.streams.get(BidirectionalStream.class).size());
+                    }
 
-                        this.compliance.stop();
+                    log.trace("Listen a newbie Bidirectional stream with " + length + " bytes to be read");
+
+                    if (length < Byte.BYTES) {
+                        this.streamCreateCount.incrementAndGet();
                         return;
                     }
 
-                    this.compliance.getExecutor().execute(() -> {
-                        log.trace("Trying to identify an Global Stream from the new Bidirectional Stream created");
+                    byte code = bidirectionalStream.readByte();
+                    @Nullable OperationUtils utils = OperationUtils.getByCode(code);
+                    boolean illegal = utils == null || !utils.isGlobalManageable();
+                    if (illegal) {
+                        this.streamCreateCount.incrementAndGet();
 
-                        while (!Thread.currentThread().isInterrupted()) try {
-                            byte code = stream.readByte();
-                            @Nullable OperationUtils utils = OperationUtils.getByCode(code);
-
-                            try (
-                                    @NotNull LogCtx.Scope ctx2 = LogCtx.builder()
-                                            .put("operation code", code)
-                                            .put("valid", utils != null)
-                                            .install();
-
-                                    @NotNull Stack.Scope scope2 = Stack.pushScope("Verification");
-                            ) {
-                                if (utils == null) {
-                                    log.warn("An invalid operation was read in a bidirectional stream. Closing the stream and increase the counter.");
-
-                                    try {
-                                        stream.close();
-                                    } catch (IOException e) {
-                                        log.trace().cause(new DirectionalStreamException(e.getMessage())).log("Cannot close an illegal bidirectional stream");
-                                    }
-
-                                    this.streamCreateCount++;
-
-                                    return;
-                                }
-
-                                if (!utils.isGlobalManageable()) {
-                                    log.warn("A bidirectional stream was created without purpose. Closing the stream and increase the counter.");
-
-                                    try {
-                                        stream.close();
-                                    } catch (IOException e) {
-                                        log.trace().cause(new DirectionalStreamException(e.getMessage())).log("Cannot close an unusable bidirectional stream");
-                                    }
-
-                                    this.streamCreateCount++;
-
-                                    return;
-                                }
-
-                                @NotNull Operation operation = utils.readOperation(stream);
-                                stream.setGlobal(true);
-                                this.streams.get(BidirectionalStream.class).add(stream);
-
-                                utils.globalHandle(operation, this);
-
-                                logStream.info("New Global Stream created by connection");
-                            }
+                        try {
+                            bidirectionalStream.close();
                         } catch (IOException e) {
-                            if (!closing) {
-                                try {
-                                    stream.close();
-                                } catch (IOException ignore) {
-                                    // ignored
-                                }
+                            log.trace("I/O error when to try close an illegal bidirectional stream: " + bidirectionalStream);
+                        }
 
-                                return;
-                            }
-
-                            logStream.trace().cause(e).log("A error occurred while to try read a global operation in Bidirectional Stream");
-                            this.streams.get(BidirectionalStream.class).remove(stream);
-
-                            this.streamCreateCount++;
-                        } catch (GlobalOperationManagerException e) {
-                            logStream.severe().cause(e).log(e.getMessage() + ".. Closing connection");
-
-                            try {
-                                stream.close();
-                                this.close();
-                            } catch (IOException ex) {
-                                log.trace().cause(e).log(ex);
-                            }
-
-                            this.compliance.stop();
+                        if (utils == null) {
+                            log.warn("Illegal operation read by Bidirectional Stream: " + code);
                             return;
                         }
-                    });
+
+                        log.warn("Would expect to read a global operation on a bidirectional stream");
+                        return;
+                    }
+
+                    // It is a Global stream now
+                    globalStream = new GlobalStream(this, quicStream);;
+                    this.streams.get(BidirectionalStream.class).remove(bidirectionalStream);
+                    this.streams.get(BidirectionalStream.class).add(globalStream);
+
+                    long remaining = length - Byte.BYTES;
+                    if (remaining <= 0) {
+                        return;
+                    }
+
+                    try {
+                        byte @NotNull [] bytes = new byte[Math.toIntExact(remaining)];
+                        int read = globalStream.read(bytes);
+                        if (read < bytes.length) {
+                            bytes = Arrays.copyOf(bytes, read);
+                        }
+
+                        globalStream.fill(bytes);
+                        if (globalStream.remaining() == 0) { // Finished
+                            @NotNull Operation operation = utils.readOperation(new DataInputStream(new ByteArrayInputStream(bytes)));
+                            logStream.trace("New operation read on bidirectional stream (" + quicStream + ") : " + operation);
+
+                            utils.globalHandle(operation, this);
+                            globalStream.setAsNonPendingOperation();
+                        }
+                    } catch (ArithmeticException e) {
+                        logStream.severe("An internal error occurred: Global stream is out of control.");
+
+                        try {
+                            globalStream.close();
+                        } catch (IOException ignore) {}
+
+                        shutdown();
+                    }
                 }
+            } catch (IOException e) {
+                if (!closing) {
+                    logStream.warn("I/O error in stream: " + e);
+
+                    if (globalStream != null) {
+                        streams.get(BidirectionalStream.class).remove(globalStream);
+
+                        try {
+                            globalStream.close();
+                        } catch (IOException ignore) {}
+                    }
+
+                    streams.get(BidirectionalStream.class).remove(bidirectionalStream);
+                    try {
+                        bidirectionalStream.close();
+                    } catch (IOException ignore) {}
+                }
+            } catch (Exception e) {
+                logStream.severe("Fatal error: " + e);
+
+                if (globalStream != null) {
+                    streams.get(BidirectionalStream.class).remove(globalStream);
+
+                    try {
+                        globalStream.close();
+                    } catch (IOException ignore) {}
+                }
+
+                if (bidirectionalStream != null) {
+                    streams.get(BidirectionalStream.class).remove(bidirectionalStream);
+                    try {
+                        bidirectionalStream.close();
+                    } catch (IOException ignore) {}
+                }
+
+                shutdown();
             }
-        });
+        };
+    }
+
+    private void shutdown() {
+        if (closing) {
+            return;
+        }
+
+        log.severe("Shutting down connection: " + this);
+
+        try {
+            close();
+        } catch (IOException e) {
+            log.warn("Error while closing connection: " + e);
+        }
+
+        this.compliance.stop();
+    }
+
+    private boolean isLimitExceeded() {
+        return streamCreateCount.get() >= STREAM_CREATED_BY_PEER_LIMIT
+                || streams.get(BidirectionalStream.class).size() >= GLOBAL_STREAM_LIMIT;
     }
 
     @Override
     public void close() throws IOException {
+        if (closing) return;
+
         this.closing = true;
 
-        for (@NotNull Set<DirectionalStream> streams : this.streams.values()) {
-            for (@NotNull DirectionalStream stream : streams) {
-                streams.remove(stream);
-                stream.close();
+        for (@NotNull Set<DirectionalStream> set : streams.values()) {
+            for (@NotNull DirectionalStream stream : set) {
+                try {
+                    stream.close();
+                } catch (IOException ignore) {}
             }
+            set.clear();
         }
 
         this.connection.close();
+    }
+
+    @Override
+    public @NotNull String toString() {
+        return this.connection.toString();
     }
 }

@@ -5,19 +5,14 @@ import tech.kwik.core.QuicStream;
 
 import java.io.*;
 
-public final class BidirectionalStream extends DirectionalStream implements DataInput, DataOutput {
+public sealed class BidirectionalStream extends DirectionalStream implements DataInput, DataOutput permits GlobalStream {
 
     private final @NotNull DataOutputStream output;
     private final @NotNull DataInputStream input;
-    private volatile boolean global;
 
     // Constructors
 
-    BidirectionalStream(@NotNull Connection connection, @NotNull QuicStream stream) {
-        this(connection, stream, false);
-    }
-
-    BidirectionalStream(@NotNull Connection connection, @NotNull QuicStream quicStream, boolean global) {
+    BidirectionalStream(@NotNull Connection connection, @NotNull QuicStream quicStream) {
         super(connection, quicStream);
 
         if (!quicStream.isBidirectional()) {
@@ -26,20 +21,6 @@ public final class BidirectionalStream extends DirectionalStream implements Data
 
         this.output = new DataOutputStream(quicStream.getOutputStream());
         this.input = new DataInputStream(quicStream.getInputStream());
-    }
-
-    // Getters
-
-    public boolean isGlobal() {
-        return global;
-    }
-
-    public void setGlobal(boolean isGlobal) {
-        if (global) {
-            throw new IllegalStateException("Cannot reverse global stream");
-        }
-
-        this.global = isGlobal;
     }
 
     // Modules
