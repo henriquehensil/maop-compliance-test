@@ -50,6 +50,12 @@ public class Compliance {
         situations.add(situation);
     }
 
+    @TestOnly
+    @VisibleForTesting
+    static void removeSituation(@NotNull Situation situation) {
+        situations.remove(situation);
+    }
+
     // Objects
 
     private final @NotNull Preset preset;
@@ -98,6 +104,7 @@ public class Compliance {
 
             thread.setUncaughtExceptionHandler((t, ex) -> {
                 log.severe().log("Unexpected internal error: " + ex.getMessage());
+                log.debug().cause(ex).log();
                 this.stop();
             });
 
@@ -111,12 +118,14 @@ public class Compliance {
     }
 
     @ApiStatus.Internal
-    public @NotNull Connection createConnection(@NotNull String name) throws IOException {
+    public @NotNull Connection createConnection(@NotNull String name, @NotNull Situation situation) throws IOException {
         if (!isRunning()) {
             throw new IllegalStateException("Compliance tests is not running");
         } else if (this.connections.containsKey(name)) {
             throw new AssertionError("Internal error");
         }
+
+        log.info("Creating new connection from the " + situation);
 
         @NotNull QuicClientConnection.Builder builder = QuicClientConnection.newBuilder()
                 .uri(preset.getHost())
@@ -137,14 +146,20 @@ public class Compliance {
 
         try {
             @NotNull QuicClientConnection client = builder.build();
+
+            log.trace("Connecting in server.. (" + client + ")");
+
             client.connect();
 
             if (!client.isConnected()) {
-                throw new IOException("Cannot connect for known reason");
+                throw new IOException("Cannot connect for unknown reason");
             }
 
             @NotNull Connection connection = new Connection(client, this);
             this.connections.put(name, connection);
+
+            log.info("Successfully connection created by " + situation);
+
             return connection;
         } catch (IOException e) {
             throw e;
@@ -159,7 +174,7 @@ public class Compliance {
 
             while (!Thread.currentThread().isInterrupted() || isRunning()) {
                 if (!iterator.hasNext()) {
-                    if (Thread.currentThread().isInterrupted()) {
+                    if (Thread.currentThread().isInterrupted() || !isRunning()) {
                         break;
                     }
 
@@ -239,6 +254,10 @@ public class Compliance {
     }
 
     public void stop() {
+        if (!running) {
+            return;
+        }
+
         log.warn("Stopping diagnostics...");
 
         this.running = false;
@@ -254,7 +273,7 @@ public class Compliance {
         }
 
         if (selfExecutor) {
-            ((ExecutorService) this.executor).shutdown();
+            ((ExecutorService) this.executor).shutdownNow();
         }
 
         log.info("Successfully stopped diagnostics");

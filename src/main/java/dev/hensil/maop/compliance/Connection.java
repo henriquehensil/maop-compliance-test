@@ -22,10 +22,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class Connection implements Closeable {
+public final class Connection implements Closeable {
 
     // Static initializers
 
@@ -38,7 +37,6 @@ public class Connection implements Closeable {
     // Objects
 
     private final @NotNull Compliance compliance;
-
     private final @NotNull QuicConnection connection;
     private final @NotNull GlobalOperationsManager manager = new GlobalOperationsManager();
     private final @NotNull Map<Class<? extends DirectionalStream>, Set<DirectionalStream>> streams = new ConcurrentHashMap<>(3, 1f) {{
@@ -48,22 +46,22 @@ public class Connection implements Closeable {
     }};
 
     private final @NotNull AtomicInteger streamCreateCount = new AtomicInteger(0);
-    private final @NotNull CompletableFuture<Void> limitFuture = new CompletableFuture<>();
+    private final @NotNull CompletableFuture<Void> polices = new CompletableFuture<>();
 
     private volatile boolean closing = false;
 
     // Constructor
 
-    protected Connection(@NotNull QuicConnection connection, @NotNull Compliance compliance) {
+    Connection(@NotNull QuicConnection connection, @NotNull Compliance compliance) {
         this.connection = connection;
         this.compliance = compliance;
         connection.setStreamReadListener(getReadListener());
 
-        this.limitFuture.whenComplete((v, error) -> {
+        this.polices.whenComplete((v, error) -> {
             if (error == null) {
-                log.warn("The limit was exceeded. Preparing to stop diagnostics...");
+                log.severe("The limit polices was exceeded from connection \"" + this + "\" Preparing to stop diagnostics..");
             } else {
-                log.warn("The limit was exceeded ( " + error.getMessage() + ") Preparing to stop diagnostics");
+                log.severe("The limit polices was exceeded ( " + error.getMessage() + ") from connection \"" + this + "\" Preparing to stop diagnostics..");
             }
 
             this.compliance.stop();
@@ -110,8 +108,12 @@ public class Connection implements Closeable {
         }
     }
 
-    protected @NotNull StreamReadListener getReadListener() {
+    private @NotNull StreamReadListener getReadListener() {
         return (qs, length) -> {
+            if (closing) {
+                return;
+            }
+
             if (!(qs instanceof QuicStreamImpl quicStream)) {
                 return;
             }
@@ -120,33 +122,17 @@ public class Connection implements Closeable {
 
             log.info("New incoming stream: " + quicStream);
 
-            if (isLimitExceeded()) { // reject
-                log.severe("Stream limit exceeded. Rejecting stream: " + quicStream);
-
-                try {
-                    quicStream.getInputStream().close();
-                } catch (IOException ignore) {}
-
-                try {
-                    quicStream.getOutputStream().close();
-                } catch (IOException ignore) {}
-
-                this.limitFuture.complete(null);
-
-                return;
-            }
-
             if (quicStream.isUnidirectional()) { // Reject
                 log.warn("Illegal unidirectional stream created by peer: " + quicStream);
 
-                streamCreateCount.incrementAndGet();
+                if (!closing) {
+                    report();
 
-                log.debug("Stream count by connection ( " + this + " ) : " + streamCreateCount.get());
-
-                try {
-                    quicStream.getInputStream().close();
-                } catch (IOException e) {
-                    log.trace("Failed to close illegal unidirectional stream: " + e);
+                    try {
+                        quicStream.getInputStream().close();
+                    } catch (IOException e) {
+                        log.trace("Failed to close illegal unidirectional stream: " + e);
+                    }
                 }
 
                 return;
@@ -210,7 +196,7 @@ public class Connection implements Closeable {
                     log.trace("Listen a newbie Bidirectional stream with " + length + " bytes to be read");
 
                     if (length < Byte.BYTES) {
-                        this.streamCreateCount.incrementAndGet();
+                        report();
                         return;
                     }
 
@@ -218,7 +204,7 @@ public class Connection implements Closeable {
                     @Nullable OperationUtils utils = OperationUtils.getByCode(code);
                     boolean illegal = utils == null || !utils.isGlobalManageable();
                     if (illegal) {
-                        this.streamCreateCount.incrementAndGet();
+                        report();
 
                         try {
                             bidirectionalStream.close();
@@ -310,6 +296,24 @@ public class Connection implements Closeable {
         };
     }
 
+    /**
+     * Help method to increase the stream counter and throws when polices limits are be exceeded.
+     * */
+    private void report() {
+        this.streamCreateCount.incrementAndGet();
+
+        log.debug("Stream count by connection ( " + this + " ) : " + streamCreateCount.get());
+
+        if (isLimitExceeded()) {
+            this.polices.complete(null);
+        }
+    }
+
+    private boolean isLimitExceeded() {
+        return streamCreateCount.get() >= STREAM_CREATED_BY_PEER_LIMIT
+                || streams.get(BidirectionalStream.class).size() >= GLOBAL_STREAM_LIMIT;
+    }
+
     private void shutdown() {
         if (closing) {
             return;
@@ -324,11 +328,6 @@ public class Connection implements Closeable {
         }
 
         this.compliance.stop();
-    }
-
-    private boolean isLimitExceeded() {
-        return streamCreateCount.get() >= STREAM_CREATED_BY_PEER_LIMIT
-                || streams.get(BidirectionalStream.class).size() >= GLOBAL_STREAM_LIMIT;
     }
 
     @Override
