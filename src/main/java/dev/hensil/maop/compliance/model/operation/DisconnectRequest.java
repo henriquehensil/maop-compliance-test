@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance.model;
+package dev.hensil.maop.compliance.model.operation;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -18,11 +18,8 @@ public final class DisconnectRequest extends Operation {
         this.reason = reason;
     }
 
-    public DisconnectRequest(byte code, int drainTime, @NotNull String reason) {
-        super(code);
-        this.drainTime = drainTime;
-        this.reasonLen = (short) reason.length();
-        this.reason = reason;
+    public DisconnectRequest(int drainTime, @NotNull String reason) {
+        this(drainTime, (short) reason.length(), reason);
     }
 
     @Override
