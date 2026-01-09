@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance.model;
+package dev.hensil.maop.compliance.model.operation;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -14,7 +14,7 @@ public final class Done extends Operation {
     }
 
     public Done(short count, @NotNull Entry @NotNull [] entries) {
-        super((byte) 0x03);
+        super((byte) 0x08);
         this.entries = entries;
         this.count = count;
     }

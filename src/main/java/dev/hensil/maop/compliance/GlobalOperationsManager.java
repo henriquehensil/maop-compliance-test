@@ -1,10 +1,12 @@
 package dev.hensil.maop.compliance;
 
 import dev.hensil.maop.compliance.exception.GlobalOperationManagerException;
-import dev.hensil.maop.compliance.model.*;
 
+import dev.hensil.maop.compliance.model.operation.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashSet;
 import java.util.Map;
@@ -16,7 +18,9 @@ import java.util.concurrent.TimeoutException;
 
 final class GlobalOperationsManager {
 
+    private static final Logger log = LoggerFactory.getLogger(GlobalOperationsManager.class);
     private final @NotNull Map<Long, Set<Stage>> operations = new ConcurrentHashMap<>();
+    private final @NotNull Map<Operation, Stage> stages = new ConcurrentHashMap<>();
 
     // Constructor
 
@@ -24,6 +28,14 @@ final class GlobalOperationsManager {
     }
 
     // Modules
+
+    public @Nullable Stage getStage(@NotNull Message message) {
+        return this.stages.get(message);
+    }
+
+    public @Nullable Stage getStage(@NotNull Request request) {
+        return this.stages.get(request);
+    }
 
     public @NotNull Stage manage(@NotNull DirectionalStream stream, @NotNull Message message) {
         for (@NotNull Set<Stage> stages : operations.values()) {
@@ -37,7 +49,9 @@ final class GlobalOperationsManager {
         @NotNull Stage stage = new Stage(message);
         @NotNull Set<Stage> set = this.operations.getOrDefault(stream.getId(), new HashSet<>());
         set.add(stage);
+
         this.operations.put(stream.getId(), set);
+        this.stages.put(message, stage);
 
         return stage;
     }
@@ -54,7 +68,9 @@ final class GlobalOperationsManager {
         @NotNull Stage stage = new Stage(request);
         @NotNull Set<Stage> set = this.operations.getOrDefault(stream.getId(), new HashSet<>());
         set.add(stage);
+
         this.operations.put(stream.getId(), set);
+        this.stages.put(request, stage);
 
         return stage;
     }

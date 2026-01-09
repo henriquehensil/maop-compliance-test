@@ -1,16 +1,25 @@
 package dev.hensil.maop.compliance;
 
 import dev.hensil.maop.compliance.exception.GlobalOperationManagerException;
-import dev.hensil.maop.compliance.model.*;
 
+import dev.hensil.maop.compliance.model.operation.*;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.DataInput;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.LockSupport;
 
-enum OperationUtils {
+public enum OperationUtils {
 
     // Static enums
 
@@ -219,7 +228,7 @@ enum OperationUtils {
             for (@NotNull Done.Entry entry : done.getEntries()) {
                 @Nullable Set<GlobalOperationsManager.Stage> stages = manager.getStages(entry.getStream());
                 if (stages == null) {
-                    throw new GlobalOperationManagerException("There are no operations on stream '" + entry.getStream() + "'  being managed by the global manager");
+                    throw new GlobalOperationManagerException("There are no operations on stream '" + entry.getStream() + "' being managed by the global manager");
                 }
 
                 boolean success = false;
@@ -263,7 +272,115 @@ enum OperationUtils {
     // Static initializers
 
     public static @Nullable OperationUtils getByCode(byte code) {
+        for (@NotNull OperationUtils utils : values()) {
+            if (utils.getCode() == code) {
+                return utils;
+            }
+        }
+
         return null;
+    }
+
+    public static int read(@NotNull BidirectionalStream stream, @NotNull ByteBuffer buffer, @NotNull Duration timeout) throws IOException, TimeoutException {
+        @NotNull CompletableFuture<Integer> future = new CompletableFuture<>();
+        future.orTimeout(timeout.getNano(), TimeUnit.NANOSECONDS);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                while (true) {
+                    if (stream.available() == 0) {
+                        LockSupport.parkNanos(timeout.toNanos() / 3);
+                        continue;
+                    }
+
+                    int read = stream.read(buffer.array(), buffer.position(), buffer.limit());
+                    future.complete(read);
+                    break;
+                }
+            } catch (IOException e) {
+                future.completeExceptionally(e);
+            }
+        });
+
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof TimeoutException to) {
+                throw to;
+            } else if (e.getCause() instanceof IOException io) {
+                throw io;
+            }
+
+            throw new AssertionError("Internal error");
+        }
+    }
+
+    public static int read(@NotNull BidirectionalStream stream, byte @NotNull [] bytes, int index, int length, @NotNull Duration timeout) throws IOException, TimeoutException {
+        @NotNull CompletableFuture<Integer> future = new CompletableFuture<>();
+        future.orTimeout(timeout.getNano(), TimeUnit.NANOSECONDS);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                while (true) {
+                    if (stream.available() == 0) {
+                        LockSupport.parkNanos(timeout.toNanos() / 3);
+                        continue;
+                    }
+
+                    int read = stream.read(bytes, index, length);
+                    future.complete(read);
+                    break;
+                }
+            } catch (IOException e) {
+                future.completeExceptionally(e);
+            }
+        });
+
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof TimeoutException to) {
+                throw to;
+            } else if (e.getCause() instanceof IOException io) {
+                throw io;
+            }
+
+            throw new AssertionError("Internal error", e);
+        }
+    }
+
+    public static int read(@NotNull UnidirectionalInputStream stream, @NotNull ByteBuffer buffer, @NotNull Duration timeout) throws IOException, TimeoutException {
+        @NotNull CompletableFuture<Integer> future = new CompletableFuture<>();
+        future.orTimeout(timeout.getNano(), TimeUnit.NANOSECONDS);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                while (true) {
+                    if (stream.available() == 0) {
+                        LockSupport.parkNanos(timeout.toNanos() / 3);
+                        continue;
+                    }
+
+                    int read = stream.read(buffer.array(), buffer.position(), buffer.limit());
+                    future.complete(read);
+                    break;
+                }
+            } catch (IOException e) {
+                future.completeExceptionally(e);
+            }
+        });
+
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof TimeoutException to) {
+                throw to;
+            } else if (e.getCause() instanceof IOException io) {
+                throw io;
+            }
+
+            throw new AssertionError("Internal error");
+        }
     }
 
     // Objects
@@ -295,4 +412,11 @@ enum OperationUtils {
     public abstract @NotNull Operation readOperation(@NotNull DataInput dataInput) throws IOException;
 
     public abstract void globalHandle(@NotNull Operation operation, @NotNull Connection connection) throws GlobalOperationManagerException;
+
+    // Native
+
+    @Override
+    public @NotNull String toString() {
+        return name().toLowerCase();
+    }
 }

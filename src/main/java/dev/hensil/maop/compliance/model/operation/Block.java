@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance.model;
+package dev.hensil.maop.compliance.model.operation;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -8,6 +8,10 @@ public final class Block extends Operation {
 
     private final long payload;
     private final byte @NotNull [] bytes;
+
+    public Block(byte @NotNull [] bytes) {
+        this(bytes.length, bytes);
+    }
 
     public Block(long payload, byte @NotNull [] bytes) {
         super((byte) 0x05);

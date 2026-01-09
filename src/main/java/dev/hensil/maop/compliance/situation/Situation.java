@@ -9,22 +9,14 @@ import java.util.Objects;
 
 public abstract class Situation {
 
-    private final @NotNull String name;
+    // Object
+
     private @Nullable Compliance compliance;
 
-    protected Situation() {
-        this.name = getClass().getSimpleName()
+    public @NotNull String getName() {
+        return getClass().getSimpleName()
                 .replaceAll("(?<!^)([A-Z])", " $1")
                 .toLowerCase();
-    }
-
-    protected Situation(@NotNull String name) {
-        name = name.toLowerCase().endsWith("situation") ? name : name + " situation";
-        this.name = name.toLowerCase();
-    }
-
-    public final @NotNull String getName() {
-        return name;
     }
 
     public final @NotNull Compliance getCompliance() {
@@ -42,7 +34,7 @@ public abstract class Situation {
 
     @Override
     public final @NotNull String toString() {
-        return name;
+        return getName();
     }
 
     @Override

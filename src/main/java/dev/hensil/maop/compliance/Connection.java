@@ -2,33 +2,41 @@ package dev.hensil.maop.compliance;
 
 import com.jlogm.Logger;
 
+import com.jlogm.utils.Coloured;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
-import dev.hensil.maop.compliance.model.Operation;
+import dev.hensil.maop.compliance.exception.GlobalOperationManagerException;
+import dev.hensil.maop.compliance.model.authentication.Authentication;
+import dev.hensil.maop.compliance.model.authentication.Disapproved;
+import dev.hensil.maop.compliance.model.authentication.Result;
+import dev.hensil.maop.compliance.model.operation.Message;
+import dev.hensil.maop.compliance.model.operation.Operation;
+import dev.hensil.maop.compliance.model.operation.Request;
 
+import org.jetbrains.annotations.Blocking;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import tech.kwik.core.QuicConnection;
+import tech.kwik.core.QuicClientConnection;
 import tech.kwik.core.StreamReadListener;
 import tech.kwik.core.stream.QuicStreamImpl;
 
+import java.awt.*;
 import java.io.ByteArrayInputStream;
 import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.IOException;
-
+import java.nio.ByteBuffer;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public final class Connection implements Closeable {
 
     // Static initializers
 
-    private static final @NotNull Logger logStream = Logger.create("Global Stream");
     private static final @NotNull Logger log = Logger.create("Connection");
 
     static final int GLOBAL_STREAM_LIMIT = 2;
@@ -37,7 +45,7 @@ public final class Connection implements Closeable {
     // Objects
 
     private final @NotNull Compliance compliance;
-    private final @NotNull QuicConnection connection;
+    private final @NotNull QuicClientConnection connection;
     private final @NotNull GlobalOperationsManager manager = new GlobalOperationsManager();
     private final @NotNull Map<Class<? extends DirectionalStream>, Set<DirectionalStream>> streams = new ConcurrentHashMap<>(3, 1f) {{
         this.put(BidirectionalStream.class, ConcurrentHashMap.newKeySet(16));
@@ -48,11 +56,12 @@ public final class Connection implements Closeable {
     private final @NotNull AtomicInteger streamCreateCount = new AtomicInteger(0);
     private final @NotNull CompletableFuture<Void> polices = new CompletableFuture<>();
 
+    private volatile boolean authenticated = false;
     private volatile boolean closing = false;
 
     // Constructor
 
-    Connection(@NotNull QuicConnection connection, @NotNull Compliance compliance) {
+    Connection(@NotNull QuicClientConnection connection, @NotNull Compliance compliance) {
         this.connection = connection;
         this.compliance = compliance;
         connection.setStreamReadListener(getReadListener());
@@ -64,14 +73,40 @@ public final class Connection implements Closeable {
                 log.severe("The limit polices was exceeded ( " + error.getMessage() + ") from connection \"" + this + "\" Preparing to stop diagnostics..");
             }
 
+            try {
+                this.close();
+            } catch (IOException ignore) {
+
+            }
+
             this.compliance.stop();
         });
     }
 
     // Getters
 
+    public boolean isAuthenticated() {
+        return authenticated;
+    }
+
+    public void setAuthenticated(boolean authenticated) {
+        if (closing) {
+            return;
+        }
+
+        if (this.authenticated) {
+            throw new IllegalStateException("Connection already authenticated. Cannot reverse authenticated connection field");
+        }
+
+        this.authenticated = authenticated;
+    }
+
     @NotNull GlobalOperationsManager getManager() {
         return manager;
+    }
+
+    public boolean isConnected() {
+        return this.connection.isConnected();
     }
 
     @SuppressWarnings("unchecked")
@@ -84,28 +119,128 @@ public final class Connection implements Closeable {
 
     // Modules
 
-    public @NotNull UnidirectionalOutputStream createUnidirectionalStream() throws DirectionalStreamException {
+    public void authenticate() throws IOException, TimeoutException {
+        if (authenticated) {
+            return;
+        }
+
+        @NotNull Authentication authentication = new Authentication(compliance.getPreset());
+        @NotNull BidirectionalStream stream = createBidirectionalStream();
+
+        @Nullable ByteBuffer bb = authentication.toByteBuffer();
+        stream.write(bb.array(), bb.position(), bb.limit());
+        stream.closeOutput();
+
+        bb = null;
+
         try {
-            @NotNull UnidirectionalOutputStream stream = new UnidirectionalOutputStream(this, this.connection.createStream(false));
+            @NotNull Duration timeout = Duration.ofSeconds(2);
+            @NotNull Result result = Result.readResult(stream, timeout);
+            if (result instanceof Disapproved disapproved) {
+                throw new IOException("Authentication disapproved: " + disapproved);
+            }
 
-            this.streams.get(UnidirectionalOutputStream.class).add(stream);
+            // Todo retry_after
+        } finally {
+            stream.close();
+        }
+    }
 
-            return stream;
-        } catch (IOException e) {
-            throw new DirectionalStreamException("A error occurs while to trying create a unidirectional output stream", e);
+    public @NotNull UnidirectionalOutputStream createUnidirectionalStream() throws DirectionalStreamException {
+        @NotNull CompletableFuture<UnidirectionalOutputStream> future = new CompletableFuture<>();
+        future.orTimeout(2, TimeUnit.SECONDS);
+
+        @NotNull CompletableFuture<Void> task = CompletableFuture.runAsync(() -> {
+            log.debug("Creating unidirectional output stream from connection (" + this + ")");
+
+            try {
+                @NotNull UnidirectionalOutputStream stream = new UnidirectionalOutputStream(this, this.connection.createStream(false));
+                log.info(Coloured.of("NEW Unidirectional stream created by connection (" + this + ") with id: " + stream.getId()).color(Color.orange).print());
+
+                this.streams.get(UnidirectionalOutputStream.class).add(stream);
+
+                future.complete(stream);
+            } catch (IOException e) {
+                future.completeExceptionally(e);
+            }
+        });
+
+        try {
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof TimeoutException) {
+                task.cancel(true);
+                throw new DirectionalStreamException("Unidirectional Stream creation timeout");
+            }
+
+            if (e.getCause() instanceof IOException) {
+                throw new DirectionalStreamException("Cannot create unidirectional stream", e);
+            }
+
+            throw new AssertionError("Internal error");
         }
     }
 
     public @NotNull BidirectionalStream createBidirectionalStream() throws DirectionalStreamException {
+        @NotNull CompletableFuture<BidirectionalStream> future = new CompletableFuture<>();
+        future.orTimeout(2, TimeUnit.SECONDS);
+
+        @NotNull CompletableFuture<Void> task = CompletableFuture.runAsync(() -> {
+            log.debug("Creating Bidirectional output stream from connection (" + this + ")");
+
+            try {
+                @NotNull BidirectionalStream stream = new BidirectionalStream(this, this.connection.createStream(true));
+                this.streams.get(BidirectionalStream.class).add(stream);
+
+                log.info(Coloured.of("NEW Bidirectional stream by connection (" + this + ") with id: " + stream.getId()).color(Color.orange).print());
+
+                future.complete(stream);
+            } catch (IOException e) {
+                future.completeExceptionally(e);
+            }
+        });
+
         try {
-            @NotNull BidirectionalStream stream = new BidirectionalStream(this, this.connection.createStream(false));
+            return future.join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof TimeoutException) {
+                task.cancel(true);
+                throw new DirectionalStreamException("Bidirectional Stream creation timeout");
+            }
 
-            this.streams.get(BidirectionalStream.class).add(stream);
+            if (e.getCause() instanceof IOException) {
+                throw new DirectionalStreamException("Cannot create bidirectional stream", e);
+            }
 
-            return stream;
-        } catch (IOException e) {
-            throw new DirectionalStreamException("A error occurs while to trying create a bidirectional stream", e);
+            throw new AssertionError("Internal error");
         }
+    }
+
+    public void manage(@NotNull DirectionalStream stream, @NotNull Message message) {
+        this.manager.manage(stream, message);
+    }
+
+    public void manage(@NotNull DirectionalStream stream, @NotNull Request request) {
+        this.manager.manage(stream, request);
+    }
+
+    @Blocking
+    public @NotNull Operation await(@NotNull Message message, int timeout) throws GlobalOperationManagerException, InterruptedException, TimeoutException {
+        @Nullable GlobalOperationsManager.Stage stage = this.getManager().getStage(message);
+        if (stage == null) {
+            throw new GlobalOperationManagerException("No managed: " + message);
+        }
+
+        return stage.await(timeout);
+    }
+
+    public @NotNull Operation await(@NotNull Request request, int timeout) throws GlobalOperationManagerException, InterruptedException, TimeoutException {
+        @Nullable GlobalOperationsManager.Stage stage = this.getManager().getStage(request);
+        if (stage == null) {
+            throw new GlobalOperationManagerException("No managed: " + request);
+        }
+
+        return stage.await(timeout);
     }
 
     private @NotNull StreamReadListener getReadListener() {
@@ -163,7 +298,7 @@ public final class Connection implements Closeable {
                                 }
 
                                 @NotNull Operation operation = utils.readOperation(new DataInputStream(new ByteArrayInputStream(bytes)));
-                                logStream.trace("New operation read on bidirectional stream (" + quicStream + ") : " + operation);
+                                log.trace("New operation read on bidirectional stream (" + quicStream + ") : " + operation);
 
                                 utils.globalHandle(operation, this);
                                 globalStream.setAsNonPendingOperation();
@@ -171,13 +306,15 @@ public final class Connection implements Closeable {
 
                             return;
                         } catch (ArithmeticException e) {
-                            logStream.severe("An internal error occurred: Global stream is out of control.");
+                            log.severe("An internal error occurred: Global stream is out of control.");
 
                             try {
                                 globalStream.close();
                             } catch (IOException ignore) {}
 
                             shutdown();
+                        } catch (RuntimeException e) {
+                            throw new AssertionError("Internal error", e);
                         }
                     }
                 }
@@ -213,11 +350,11 @@ public final class Connection implements Closeable {
                         }
 
                         if (utils == null) {
-                            log.warn("Illegal operation read by Bidirectional Stream: " + code);
+                            log.warn("Illegal operation read by Bidirectional Stream ( " + quicStream + ") with code: " + code);
                             return;
                         }
 
-                        log.warn("Would expect to read a global operation on a bidirectional stream");
+                        log.warn("Would expect to read a global operation on a bidirectional stream (" + quicStream + ") but was read a " + utils + " operation");
                         return;
                     }
 
@@ -238,27 +375,30 @@ public final class Connection implements Closeable {
                             bytes = Arrays.copyOf(bytes, read);
                         }
 
+                        globalStream.pending(utils);
                         globalStream.fill(bytes);
                         if (globalStream.remaining() == 0) { // Finished
                             @NotNull Operation operation = utils.readOperation(new DataInputStream(new ByteArrayInputStream(bytes)));
-                            logStream.trace("New operation read on bidirectional stream (" + quicStream + ") : " + operation);
+                            log.trace("New operation read on bidirectional stream (" + quicStream + ") : " + operation);
 
                             utils.globalHandle(operation, this);
                             globalStream.setAsNonPendingOperation();
                         }
                     } catch (ArithmeticException e) {
-                        logStream.severe("An internal error occurred: Global stream is out of control.");
+                        log.severe("An internal error occurred: Global stream is out of control.");
 
                         try {
                             globalStream.close();
                         } catch (IOException ignore) {}
 
                         shutdown();
+                    } catch (RuntimeException e) {
+                        throw new AssertionError("Internal error", e);
                     }
                 }
             } catch (IOException e) {
                 if (!closing) {
-                    logStream.warn("I/O error in stream: " + e);
+                    log.warn("I/O error in stream: " + e);
 
                     if (globalStream != null) {
                         streams.get(BidirectionalStream.class).remove(globalStream);
@@ -273,25 +413,28 @@ public final class Connection implements Closeable {
                         bidirectionalStream.close();
                     } catch (IOException ignore) {}
                 }
-            } catch (Exception e) {
-                logStream.severe("Fatal error: " + e);
+            } catch (Throwable e) {
+                log.severe("Unexpected fatal error: " + e.getMessage());
+                log.debug().cause(e).log();
 
-                if (globalStream != null) {
-                    streams.get(BidirectionalStream.class).remove(globalStream);
+                if (!closing) {
+                    if (globalStream != null) {
+                        streams.get(BidirectionalStream.class).remove(globalStream);
 
-                    try {
-                        globalStream.close();
-                    } catch (IOException ignore) {}
+                        try {
+                            globalStream.close();
+                        } catch (IOException ignore) {}
+                    }
+
+                    if (bidirectionalStream != null) {
+                        streams.get(BidirectionalStream.class).remove(bidirectionalStream);
+                        try {
+                            bidirectionalStream.close();
+                        } catch (IOException ignore) {}
+                    }
+
+                    shutdown();
                 }
-
-                if (bidirectionalStream != null) {
-                    streams.get(BidirectionalStream.class).remove(bidirectionalStream);
-                    try {
-                        bidirectionalStream.close();
-                    } catch (IOException ignore) {}
-                }
-
-                shutdown();
             }
         };
     }
@@ -319,7 +462,7 @@ public final class Connection implements Closeable {
             return;
         }
 
-        log.severe("Shutting down connection: " + this);
+        log.warn("Shutting down connection: " + this);
 
         try {
             close();
@@ -335,6 +478,9 @@ public final class Connection implements Closeable {
         if (closing) return;
 
         this.closing = true;
+        this.authenticated = false;
+
+        this.compliance.remove(this);
 
         for (@NotNull Set<DirectionalStream> set : streams.values()) {
             for (@NotNull DirectionalStream stream : set) {

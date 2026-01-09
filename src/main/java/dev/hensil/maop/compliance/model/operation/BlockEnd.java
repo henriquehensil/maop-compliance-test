@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance.model;
+package dev.hensil.maop.compliance.model.operation;
 
 import org.jetbrains.annotations.NotNull;
 

@@ -2,6 +2,8 @@ package dev.hensil.maop.compliance;
 
 import com.jlogm.Logger;
 
+import com.jlogm.utils.Coloured;
+import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.situation.Situation;
 
 import dev.meinicke.plugin.PluginInfo;
@@ -17,8 +19,10 @@ import org.jetbrains.annotations.*;
 import tech.kwik.core.QuicClientConnection;
 import tech.kwik.core.log.NullLogger;
 
+import java.awt.*;
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.security.Key;
 import java.time.Duration;
 
 import java.util.*;
@@ -103,9 +107,16 @@ public class Compliance {
             @NotNull Thread thread = new Thread(r);
 
             thread.setUncaughtExceptionHandler((t, ex) -> {
-                log.severe().log("Unexpected internal error: " + ex.getMessage());
+                if (running) {
+                    log.severe().log("Unexpected internal error: " + ex.getMessage());
+                    log.debug().cause(ex).log();
+                    this.stop();
+
+                    return;
+                }
+
+                log.trace("Unexpected internal error occurs while stopping: " + ex);
                 log.debug().cause(ex).log();
-                this.stop();
             });
 
             return thread;
@@ -113,19 +124,32 @@ public class Compliance {
     }
 
     @ApiStatus.Internal
+    void remove(@NotNull Connection connection) {
+        for (@NotNull Map.Entry<String, Connection> entry : connections.entrySet()) {
+            if (entry.getValue() == connection) {
+                this.connections.remove(entry.getKey());
+            }
+        }
+    }
+
+    public @NotNull Preset getPreset() {
+        return preset;
+    }
+
+    @ApiStatus.Internal
     public @Nullable Connection getConnection(@NotNull String name) {
         return this.connections.get(name);
     }
 
+    // Modules
+
     @ApiStatus.Internal
-    public @NotNull Connection createConnection(@NotNull String name, @NotNull Situation situation) throws IOException {
-        if (!isRunning()) {
-            throw new IllegalStateException("Compliance tests is not running");
-        } else if (this.connections.containsKey(name)) {
+    public @NotNull Connection createConnection(@NotNull String name, @NotNull Situation situation) throws ConnectionException {
+        if (this.connections.containsKey(name)) {
             throw new AssertionError("Internal error");
         }
 
-        log.info("Creating new connection from the " + situation);
+        log.info(Coloured.of("Creating new connection from the ").color(Color.yellow).print() + Coloured.of(situation.toString()).color(Color.CYAN).print());
 
         @NotNull QuicClientConnection.Builder builder = QuicClientConnection.newBuilder()
                 .uri(preset.getHost())
@@ -158,11 +182,11 @@ public class Compliance {
             @NotNull Connection connection = new Connection(client, this);
             this.connections.put(name, connection);
 
-            log.info("Successfully connection created by " + situation);
+            log.info(Coloured.of("Successfully connection created by ").color(Color.yellow).print() + Coloured.of(situation.getName()).color(Color.CYAN).print());
 
             return connection;
         } catch (IOException e) {
-            throw e;
+            throw new ConnectionException(e);
         } catch (Throwable e) {
             throw new AssertionError("Internal error", e);
         }
@@ -183,11 +207,14 @@ public class Compliance {
                 }
 
                 @NotNull Situation situation = iterator.next();
-                log.info("Next diagnose: " + situation.getName());
+                log.info("Next diagnose: " + Coloured.of(situation.getName()).color(Color.CYAN).print());
 
                 boolean severe = situation.diagnostic();
                 if (severe) {
-                    log.warn("The " + situation + " ended severely. Interrupting all diagnostics...");
+                    if (running) {
+                        log.warn("The " + situation + " ended severely. Interrupting all diagnostics...");
+                    }
+
                     break;
                 }
             }

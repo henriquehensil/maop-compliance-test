@@ -1,0 +1,33 @@
+Fluxo de Autenticação
+    - Bidirectional
+        - Testar autenticação via unidirectional stream
+    - Client Request
+        - Enviar request inválidas
+            - Testar envio de outras Operações
+            - Testar envios de campos inválidos
+                - ‘Tokens’
+                - Metadados
+                    - Quantidade de pares chave-valor erradas
+                    - Keys e Values desconhecidos - Servidor deve ignorar?
+                - Versões inválidas
+                - Vendor vázio
+    - Server Response
+        - Validar campos?
+    - Stream closed
+
+Fluxo de operação
+    - Precisa estar autenticado
+        - Testar operações sem estar autenticado
+            - Antes de se autenticar
+            - Após receber "Disapproved"
+    - Message
+        - Unidirectional
+            - Testar envio em Bidirectional
+            - Testar envio em global?
+        - Blocks após proceed
+            - Testar envio antes de Message
+            - Testar envio antes de Proceed
+            - Testar envio errado
+                - BlockEnd antes de block
+                - Block > payload declarado
+                - Block < payload declarado

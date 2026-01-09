@@ -1,14 +1,18 @@
 package dev.hensil.maop.compliance;
 
+import dev.hensil.maop.compliance.model.Version;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.math.BigInteger;
 import java.net.URI;
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.cert.X509Certificate;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-public class Preset {
+public final class Preset {
 
     // Static initializers
 
@@ -18,6 +22,13 @@ public class Preset {
 
     // Objects
 
+    private final @NotNull String authenticationType;
+    private final byte @NotNull [] authenticationToken;
+    private final @NotNull Map<String, String> authenticationMetadata;
+
+    private final @NotNull Version version;
+    private final @NotNull String vendor;
+
     private final @NotNull URI host;
     private final @Nullable KeyStore keyStore;
     private final @Nullable String keyPassword;
@@ -26,17 +37,23 @@ public class Preset {
 
     // Constructor
 
-    public Preset(@NotNull URI host) {
-        this(host, null, null, null, null);
-    }
-
     public Preset(
+            @NotNull String authenticationType,
+            byte @NotNull [] authenticationToken,
+            @NotNull Map<String, String> authenticationMetadata,
+            @NotNull Version version,
+            @NotNull String vendor,
             @NotNull URI host,
             @Nullable KeyStore keyStore,
             @Nullable String keyPassword,
             @Nullable X509Certificate certificate,
             @Nullable PrivateKey privateKey
     ) {
+        this.authenticationType = authenticationType;
+        this.authenticationToken = authenticationToken;
+        this.authenticationMetadata = authenticationMetadata;
+        this.version = version;
+        this.vendor = vendor;
         this.host = host;
         this.keyStore = keyStore;
         this.keyPassword = keyPassword;
@@ -46,12 +63,32 @@ public class Preset {
 
     // Getters
 
+    public @NotNull String getAuthenticationType() {
+        return authenticationType;
+    }
+
+    public byte @NotNull [] getAuthenticationToken() {
+        return authenticationToken;
+    }
+
+    public @NotNull Map<String, String> getAuthenticationMetadata() {
+        return authenticationMetadata;
+    }
+
+    public @NotNull Version getVersion() {
+        return version;
+    }
+
+    public @NotNull String getVendor() {
+        return vendor;
+    }
+
     public @NotNull URI getHost() {
         return host;
     }
 
     public boolean isServerNoCertification() {
-        return (keyStore == null && keyPassword == null) || (certificate == null && privateKey == null);
+        return (keyStore == null && keyPassword == null) && (certificate == null && privateKey == null);
     }
 
     public @Nullable KeyStore getKeyStore() {
@@ -74,6 +111,13 @@ public class Preset {
 
     public static final class Builder {
 
+        private @NotNull String authenticationType = "Basic";
+        private byte @NotNull [] authenticationToken = new byte[0];
+        private @NotNull Map<String, String> authenticationMetadata = new LinkedHashMap<>();
+
+        private @NotNull Version version = Version.parse("1.0.0");
+        private @Nullable String vendor;
+
         private @Nullable URI host;
 
         private @Nullable KeyStore keyStore;
@@ -85,10 +129,40 @@ public class Preset {
         // Constructor
 
         private Builder() {
-
+            //
         }
 
         // Modules
+
+        public @NotNull Builder authenticationType(@NotNull String type) {
+            this.authenticationType = type;
+            return this;
+        }
+
+        public @NotNull Builder authenticationToken(byte @NotNull [] token) {
+            this.authenticationToken = token;
+            return this;
+        }
+
+        public @NotNull Builder authenticationMetadata(@NotNull String key, @NotNull String value) {
+            this.authenticationMetadata.put(key, value);
+            return this;
+        }
+
+        public @NotNull Builder authenticationMetadata(@NotNull Map<String, String> data) {
+            this.authenticationMetadata = data;
+            return this;
+        }
+
+        public @NotNull Builder version(@NotNull Version version) {
+            this.version = version;
+            return this;
+        }
+
+        public @NotNull Builder vendor(@NotNull String vendor) {
+            this.vendor = vendor;
+            return this;
+        }
 
         public @NotNull Builder uri(@Nullable URI uri) {
             this.host = uri;
@@ -126,7 +200,22 @@ public class Preset {
                 throw new IllegalArgumentException("Key password must be set when key manager is set");
             }
 
-            return new Preset(host, keyStore, keyPassword, certificate, privateKey);
+            if (vendor == null) {
+                throw new IllegalArgumentException("Vendor cannot be empty");
+            }
+
+            return new Preset(
+                    authenticationType,
+                    authenticationToken,
+                    authenticationMetadata,
+                    version,
+                    vendor,
+                    host,
+                    keyStore,
+                    keyPassword,
+                    certificate,
+                    privateKey
+            );
         }
     }
 }

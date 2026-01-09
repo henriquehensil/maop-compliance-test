@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance.model;
+package dev.hensil.maop.compliance.model.operation;
 
 import org.jetbrains.annotations.NotNull;
 
@@ -16,13 +16,6 @@ public final class Proceed extends Operation {
 
     public @NotNull Entry @NotNull [] getEntries() {
         return entries;
-    }
-
-    @Override
-    public @NotNull String toString() {
-        return "Proceed{" +
-                "entries=" + Arrays.toString(entries) +
-                '}';
     }
 
     @Override
