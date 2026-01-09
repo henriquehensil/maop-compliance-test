@@ -22,6 +22,10 @@ public final class UnidirectionalInputStream extends DirectionalStream implement
 
     // Modules
 
+    public int available() throws IOException {
+        return inputStream.available();
+    }
+
     public int read(byte @NotNull [] b) throws IOException {
         return this.inputStream.read(b);
     }

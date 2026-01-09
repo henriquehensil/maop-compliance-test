@@ -23,6 +23,12 @@ public sealed class BidirectionalStream extends DirectionalStream implements Dat
         this.input = new DataInputStream(quicStream.getInputStream());
     }
 
+    // Getters
+
+    public int available() throws IOException {
+        return input.available();
+    }
+
     // Modules
 
     public void write(int b) throws IOException {
