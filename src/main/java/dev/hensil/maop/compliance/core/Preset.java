@@ -1,10 +1,9 @@
-package dev.hensil.maop.compliance;
+package dev.hensil.maop.compliance.core;
 
 import dev.hensil.maop.compliance.model.Version;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.math.BigInteger;
 import java.net.URI;
 import java.security.KeyStore;
 import java.security.PrivateKey;

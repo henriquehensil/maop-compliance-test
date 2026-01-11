@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance;
+package dev.hensil.maop.compliance.core;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -27,11 +27,11 @@ public final class UnidirectionalInputStream extends DirectionalStream implement
     }
 
     public int read(byte @NotNull [] b) throws IOException {
-        return this.inputStream.read(b);
+        return inputStream.read(b);
     }
 
     public int read(byte[] b, int off, int len) throws IOException {
-        return this.inputStream.read(b, off, len);
+        return inputStream.read(b, off, len);
     }
 
     public void readFully(byte @NotNull [] b) throws IOException {

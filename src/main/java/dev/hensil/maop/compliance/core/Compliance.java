@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance;
+package dev.hensil.maop.compliance.core;
 
 import com.jlogm.Logger;
 
@@ -22,7 +22,6 @@ import tech.kwik.core.log.NullLogger;
 import java.awt.*;
 import java.io.IOException;
 import java.lang.reflect.Field;
-import java.security.Key;
 import java.time.Duration;
 
 import java.util.*;
@@ -143,13 +142,20 @@ public class Compliance {
 
     // Modules
 
-    @ApiStatus.Internal
     public @NotNull Connection createConnection(@NotNull String name, @NotNull Situation situation) throws ConnectionException {
+        log.info(Coloured.of("Creating new connection from the ").color(Color.yellow).print() + Coloured.of(situation.toString()).color(Color.CYAN).print());
+
+        @NotNull Connection connection = createConnection(name);
+
+        log.info(Coloured.of("Successfully connection created by ").color(Color.yellow).print() + Coloured.of(situation.getName()).color(Color.CYAN).print());
+
+        return connection;
+    }
+
+    @NotNull Connection createConnection(@NotNull String name) throws ConnectionException {
         if (this.connections.containsKey(name)) {
             throw new AssertionError("Internal error");
         }
-
-        log.info(Coloured.of("Creating new connection from the ").color(Color.yellow).print() + Coloured.of(situation.toString()).color(Color.CYAN).print());
 
         @NotNull QuicClientConnection.Builder builder = QuicClientConnection.newBuilder()
                 .uri(preset.getHost())
@@ -181,8 +187,6 @@ public class Compliance {
 
             @NotNull Connection connection = new Connection(client, this);
             this.connections.put(name, connection);
-
-            log.info(Coloured.of("Successfully connection created by ").color(Color.yellow).print() + Coloured.of(situation.getName()).color(Color.CYAN).print());
 
             return connection;
         } catch (IOException e) {

@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance;
+package dev.hensil.maop.compliance.core;
 
 import org.jetbrains.annotations.MustBeInvokedByOverriders;
 import org.jetbrains.annotations.NotNull;
@@ -46,7 +46,7 @@ public abstract class DirectionalStream implements Closeable {
     @MustBeInvokedByOverriders
     public boolean equals(@Nullable Object o) {
         if (!(o instanceof DirectionalStream that)) return false;
-        return stream == that.stream;
+        return this.stream == that.stream && this == o;
     }
 
     @Override

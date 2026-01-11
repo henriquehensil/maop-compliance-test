@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance;
+package dev.hensil.maop.compliance.core;
 
 import org.jetbrains.annotations.NotNull;
 import tech.kwik.core.QuicStream;
@@ -24,6 +24,15 @@ public sealed class BidirectionalStream extends DirectionalStream implements Dat
     }
 
     // Getters
+
+    boolean isOpen() {
+        try {
+            available();
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
+    }
 
     public int available() throws IOException {
         return input.available();

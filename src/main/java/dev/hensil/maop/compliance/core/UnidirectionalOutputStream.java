@@ -1,7 +1,6 @@
-package dev.hensil.maop.compliance;
+package dev.hensil.maop.compliance.core;
 
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import tech.kwik.core.QuicStream;
 
@@ -81,12 +80,5 @@ public final class UnidirectionalOutputStream extends DirectionalStream implemen
     @Override
     public void close() throws IOException {
         this.outputStream.close();
-    }
-
-    // Native
-
-    @Override
-    public boolean equals(@Nullable Object o) {
-        return super.equals(o) && o.getClass() == this.getClass();
     }
 }
