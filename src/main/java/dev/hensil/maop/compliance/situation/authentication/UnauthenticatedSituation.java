@@ -3,8 +3,8 @@ package dev.hensil.maop.compliance.situation.authentication;
 import com.jlogm.Logger;
 import com.jlogm.utils.Coloured;
 
-import dev.hensil.maop.compliance.BidirectionalStream;
-import dev.hensil.maop.compliance.Connection;
+import dev.hensil.maop.compliance.core.BidirectionalStream;
+import dev.hensil.maop.compliance.core.Connection;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.model.authentication.Approved;
 import dev.hensil.maop.compliance.model.authentication.Disapproved;

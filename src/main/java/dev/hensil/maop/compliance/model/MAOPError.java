@@ -35,18 +35,20 @@ public final class MAOPError {
     public static final @NotNull MAOPError RESPONSE_CONSUME = new MAOPError("RESPONSE_CONSUME", (short) 19);
     public static final @NotNull MAOPError UNKNOWN_ERROR = new MAOPError("UNKNOWN_ERROR", (short) 49);
 
-    private static final @NotNull Map<Short, MAOPError> errors = new HashMap<>() {{
-        for (@NotNull Field field : this.getClass().getFields()) {
+    private static final @NotNull Map<Short, MAOPError> errors = new HashMap<>();
+
+    static {
+        for (@NotNull Field field : MAOPError.class.getFields()) {
             if (field.getDeclaringClass() == MAOPError.class && Modifier.isStatic(field.getModifiers())) {
                 try {
                     @NotNull MAOPError error = (MAOPError) field.get(null);
-                    this.put(error.getCode(), error);
+                    errors.put(error.getCode(), error);
                 } catch (Throwable e) {
                     throw new AssertionError("Internal error", e);
                 }
             }
         }
-    }};
+    }
 
     public static @Nullable MAOPError get(short code) {
         return errors.get(code);

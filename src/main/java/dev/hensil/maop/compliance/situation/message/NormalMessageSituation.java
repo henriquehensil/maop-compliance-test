@@ -2,8 +2,8 @@ package dev.hensil.maop.compliance.situation.message;
 
 import com.jlogm.Logger;
 
-import dev.hensil.maop.compliance.Connection;
-import dev.hensil.maop.compliance.UnidirectionalOutputStream;
+import dev.hensil.maop.compliance.core.Connection;
+import dev.hensil.maop.compliance.core.UnidirectionalOutputStream;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.exception.GlobalOperationManagerException;
@@ -19,6 +19,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Plugin
@@ -55,7 +56,7 @@ final class NormalMessageSituation extends Situation {
             @NotNull Message message = new Message((short) 1, 0L, (byte) 0);
 
             log.debug("Managing message operation to wait Done response");
-            connection.manage(stream, message);
+            connection.observe(stream);
 
             log.info("Writing message operation");
             stream.write(message.toBytes());
@@ -63,7 +64,7 @@ final class NormalMessageSituation extends Situation {
             log.info("Successfully written");
             log.info("Waiting for done as response");
 
-            @NotNull Operation operation = connection.await(message, 2000);
+            @NotNull Operation operation = connection.await(stream, 2000, TimeUnit.SECONDS);
             if (!(operation instanceof Done done)) {
                 log.severe("It was expected to receive \"Done\" but instead it was " + operation.getClass().getSimpleName());
                 return true;
@@ -110,8 +111,8 @@ final class NormalMessageSituation extends Situation {
         } catch (IOException e) {
             log.trace("Failed to write message operation: " + e.getMessage());
             return true;
-        } catch (GlobalOperationManagerException | TimeoutException e) {
-            if (e instanceof GlobalOperationManagerException) {
+        } catch (ClassCastException | TimeoutException e) {
+            if (e instanceof ClassCastException) {
                 throw new AssertionError("Internal error", e);
             }
 

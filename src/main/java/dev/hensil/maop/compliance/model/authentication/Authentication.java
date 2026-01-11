@@ -1,6 +1,6 @@
 package dev.hensil.maop.compliance.model.authentication;
 
-import dev.hensil.maop.compliance.Preset;
+import dev.hensil.maop.compliance.core.Preset;
 
 import dev.hensil.maop.compliance.model.Version;
 import org.jetbrains.annotations.NotNull;

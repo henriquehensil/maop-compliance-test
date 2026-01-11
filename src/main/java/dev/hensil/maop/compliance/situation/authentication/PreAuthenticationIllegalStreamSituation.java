@@ -2,8 +2,8 @@ package dev.hensil.maop.compliance.situation.authentication;
 
 import com.jlogm.Logger;
 
-import dev.hensil.maop.compliance.Connection;
-import dev.hensil.maop.compliance.UnidirectionalOutputStream;
+import dev.hensil.maop.compliance.core.Connection;
+import dev.hensil.maop.compliance.core.UnidirectionalOutputStream;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.model.authentication.Authentication;
 import dev.hensil.maop.compliance.situation.Situation;

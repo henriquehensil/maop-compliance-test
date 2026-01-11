@@ -1,6 +1,6 @@
 package dev.hensil.maop.compliance.situation;
 
-import dev.hensil.maop.compliance.Compliance;
+import dev.hensil.maop.compliance.core.Compliance;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;

@@ -2,8 +2,8 @@ package dev.hensil.maop.compliance.situation.authentication;
 
 import com.jlogm.Logger;
 
-import dev.hensil.maop.compliance.BidirectionalStream;
-import dev.hensil.maop.compliance.Connection;
+import dev.hensil.maop.compliance.core.BidirectionalStream;
+import dev.hensil.maop.compliance.core.Connection;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.model.authentication.Authentication;
 import dev.hensil.maop.compliance.model.authentication.Disapproved;
@@ -16,7 +16,6 @@ import dev.meinicke.plugin.annotation.Priority;
 
 import org.jetbrains.annotations.NotNull;
 
-import java.awt.*;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.TimeoutException;

@@ -11,7 +11,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-import dev.hensil.maop.compliance.BidirectionalStream;
+import dev.hensil.maop.compliance.core.BidirectionalStream;
 
 import dev.hensil.maop.compliance.model.Version;
 import org.jetbrains.annotations.Blocking;

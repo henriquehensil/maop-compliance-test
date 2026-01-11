@@ -1,8 +1,9 @@
 package dev.hensil.maop.compliance.situation.message;
 
 import com.jlogm.Logger;
-import dev.hensil.maop.compliance.BidirectionalStream;
-import dev.hensil.maop.compliance.Connection;
+
+import dev.hensil.maop.compliance.core.BidirectionalStream;
+import dev.hensil.maop.compliance.core.Connection;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.exception.GlobalOperationManagerException;
@@ -11,6 +12,7 @@ import dev.hensil.maop.compliance.model.operation.Fail;
 import dev.hensil.maop.compliance.model.operation.Message;
 import dev.hensil.maop.compliance.model.operation.Operation;
 import dev.hensil.maop.compliance.situation.Situation;
+
 import dev.meinicke.plugin.annotation.Dependency;
 import dev.meinicke.plugin.annotation.Plugin;
 import org.jetbrains.annotations.NotNull;
@@ -19,6 +21,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Plugin
@@ -27,7 +30,7 @@ final class BidirectionalMessageSituation extends Situation {
 
     // Static initializers
 
-    private final @NotNull Logger log = Logger.create(BidirectionalStream.class);
+    private final @NotNull Logger log = Logger.create(BidirectionalMessageSituation.class);
 
     // Objects
 
@@ -58,7 +61,7 @@ final class BidirectionalMessageSituation extends Situation {
             @NotNull Message message = new Message((short) 1, 0L, (byte) 0);
 
             log.debug("Managing message operation to wait Done response");
-            connection.manage(stream, message);
+            connection.observe(stream);
 
             log.info("Writing message operation");
             stream.write(message.toBytes());
@@ -66,7 +69,7 @@ final class BidirectionalMessageSituation extends Situation {
             log.info("Successfully written");
             log.info("Waiting for FAIL as response");
 
-            @NotNull Operation operation = connection.await(message, 2000);
+            @NotNull Operation operation = connection.await(stream, 2000, TimeUnit.SECONDS);
             if (!(operation instanceof Fail fail)) {
                 log.severe("It was expected to receive \"Fail\" but instead it was " + operation.getClass().getSimpleName());
                 return true;
@@ -115,8 +118,8 @@ final class BidirectionalMessageSituation extends Situation {
         } catch (IOException e) {
             log.trace("Failed to write message operation: " + e.getMessage());
             return true;
-        } catch (GlobalOperationManagerException | TimeoutException e) {
-            if (e instanceof GlobalOperationManagerException) {
+        } catch (ClassCastException | TimeoutException e) {
+            if (e instanceof ClassCastException) {
                 throw new AssertionError("Internal error", e);
             }
 
