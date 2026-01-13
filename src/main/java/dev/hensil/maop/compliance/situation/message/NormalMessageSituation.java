@@ -6,7 +6,6 @@ import dev.hensil.maop.compliance.core.Connection;
 import dev.hensil.maop.compliance.core.UnidirectionalOutputStream;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
-import dev.hensil.maop.compliance.exception.GlobalOperationManagerException;
 import dev.hensil.maop.compliance.model.operation.Done;
 import dev.hensil.maop.compliance.model.operation.Message;
 import dev.hensil.maop.compliance.model.operation.Operation;
@@ -38,7 +37,7 @@ final class NormalMessageSituation extends Situation {
         @Nullable Connection connection = getCompliance().getConnection("authentication");
 
         try {
-            if (connection == null) {
+            if (connection == null || !connection.isAuthenticated()) {
                 log.warn("Authenticated connection lost");
                 connection = getCompliance().createConnection("authentication", this);
 
@@ -54,9 +53,6 @@ final class NormalMessageSituation extends Situation {
 
             @NotNull UnidirectionalOutputStream stream = connection.createUnidirectionalStream();
             @NotNull Message message = new Message((short) 1, 0L, (byte) 0);
-
-            log.debug("Managing message operation to wait Done response");
-            connection.observe(stream);
 
             log.info("Writing message operation");
             stream.write(message.toBytes());
@@ -113,7 +109,8 @@ final class NormalMessageSituation extends Situation {
             return true;
         } catch (ClassCastException | TimeoutException e) {
             if (e instanceof ClassCastException) {
-                throw new AssertionError("Internal error", e);
+                log.severe().cause(e).log("Internal operation manager error");
+                return true;
             }
 
             log.severe("No response \"Done\" received in the global pool");

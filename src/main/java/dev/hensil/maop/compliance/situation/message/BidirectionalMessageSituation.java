@@ -43,7 +43,7 @@ final class BidirectionalMessageSituation extends Situation {
         @Nullable Connection connection = getCompliance().getConnection("authentication");
 
         try {
-            if (connection == null) {
+            if (connection == null || !connection.isAuthenticated()) {
                 log.warn("Authenticated connection lost");
                 connection = getCompliance().createConnection("authentication", this);
 
@@ -59,9 +59,6 @@ final class BidirectionalMessageSituation extends Situation {
 
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
             @NotNull Message message = new Message((short) 1, 0L, (byte) 0);
-
-            log.debug("Managing message operation to wait Done response");
-            connection.observe(stream);
 
             log.info("Writing message operation");
             stream.write(message.toBytes());
@@ -120,7 +117,8 @@ final class BidirectionalMessageSituation extends Situation {
             return true;
         } catch (ClassCastException | TimeoutException e) {
             if (e instanceof ClassCastException) {
-                throw new AssertionError("Internal error", e);
+                log.severe().cause(e).log("Internal operation manager error");
+                return true;
             }
 
             log.severe("No response \"Fail\" received in the global pool");

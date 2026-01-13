@@ -240,7 +240,7 @@ public sealed class Result permits Disapproved, Approved {
                 int size = 9 + reasonBytes.length + 1 + versionBytes.length + 1 + vendorBytes.length;
                 buffer = ByteBuffer.allocate(size);
                 buffer.put((byte)0);
-                buffer.putShort(d.getCode());
+                buffer.putShort(d.getErrorCode());
                 Duration retry = d.getRetryAfter();
                 long msLong = retry != null ? retry.toMillis() : 0L;
                 if (msLong < 0L) {

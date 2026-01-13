@@ -84,7 +84,7 @@ public final class Connection implements Closeable {
     // Getters
 
     public boolean isAuthenticated() {
-        return authenticated;
+        return isConnected() && authenticated;
     }
 
     public void setAuthenticated(boolean authenticated) {
@@ -144,7 +144,7 @@ public final class Connection implements Closeable {
 
     public void authenticate() throws IOException, TimeoutException {
         // Todo retry_after
-        if (authenticated) {
+        if (isAuthenticated()) {
             return;
         }
 
@@ -248,7 +248,13 @@ public final class Connection implements Closeable {
         });
 
         try {
-            return future.join();
+            @NotNull BidirectionalStream stream = future.join();
+
+            log.debug("Put stream (" + stream.getId() + ") as observable");
+
+            observe(stream);
+
+            return stream;
         } catch (CompletionException e) {
             if (e.getCause() instanceof TimeoutException) {
                 task.cancel(true);
@@ -272,15 +278,7 @@ public final class Connection implements Closeable {
         }
     }
 
-    public void observe(@NotNull UnidirectionalOutputStream stream) throws IOException {
-        observe0(stream);
-    }
-
-    public void observe(@NotNull BidirectionalStream stream) throws IOException {
-        observe0(stream);
-    }
-
-    private @NotNull DirectionalStreamObserver observe0(@NotNull DirectionalStream stream) throws IOException {
+    private @NotNull DirectionalStreamObserver observe(@NotNull DirectionalStream stream) {
         @Nullable DirectionalStreamObserver observer = this.observers.get(stream.getId());
         if (observer != null) {
             return observer;
@@ -305,7 +303,8 @@ public final class Connection implements Closeable {
     private @NotNull Operation await0(@NotNull DirectionalStream stream, int timeout, @NotNull TimeUnit timeUnit) throws IOException, TimeoutException, InterruptedException {
         @Nullable DirectionalStreamObserver observer = this.observers.get(stream.getId());
         if (observer == null) {
-            observer = observe0(stream);
+            observer = observe(stream);
+            log.trace("Non observable stream: " + stream);
         }
 
         return observer.await(timeout, timeUnit);
@@ -341,6 +340,7 @@ public final class Connection implements Closeable {
         for (@NotNull Set<DirectionalStream> set : streams.values()) {
             for (@NotNull DirectionalStream stream : set) {
                 try {
+                    this.observers.remove(stream.getId());
                     stream.close();
                 } catch (IOException ignore) {}
             }

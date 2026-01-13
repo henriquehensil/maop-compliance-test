@@ -44,6 +44,10 @@ public final class Fail extends Operation {
         return reason;
     }
 
+    public @NotNull String getReasonToString() {
+        return new String(getReason(), StandardCharsets.UTF_8);
+    }
+
     @Override
     public byte @NotNull [] toBytes() {
         return ByteBuffer.allocate(8 + 2 + 2 + reason.length)

@@ -153,8 +153,16 @@ public class Compliance {
     }
 
     @NotNull Connection createConnection(@NotNull String name) throws ConnectionException {
-        if (this.connections.containsKey(name)) {
-            throw new AssertionError("Internal error");
+        @Nullable Connection connection = getConnection(name);
+        if (connection != null) {
+            log.trace("Close connection to be replacing for another connection name: " + connection);
+            try {
+                connection.close();
+            } catch (IOException e) {
+                log.trace("Cannot close connection: " + e);
+            }
+
+            this.connections.remove(name);
         }
 
         @NotNull QuicClientConnection.Builder builder = QuicClientConnection.newBuilder()
@@ -185,7 +193,7 @@ public class Compliance {
                 throw new IOException("Cannot connect for unknown reason");
             }
 
-            @NotNull Connection connection = new Connection(client, this);
+            connection = new Connection(client, this);
             this.connections.put(name, connection);
 
             return connection;

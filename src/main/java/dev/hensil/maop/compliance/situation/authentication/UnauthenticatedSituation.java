@@ -197,9 +197,9 @@ final class UnauthenticatedSituation extends Situation {
                     }};
 
                     @NotNull Disapproved disapproved = (Disapproved) result;
-                    @Nullable MAOPError error = MAOPError.get(disapproved.getCode());
+                    @Nullable MAOPError error = MAOPError.get(disapproved.getErrorCode());
                     if (error == null) {
-                        log.severe("Error code not found for " + disapproved.getCode());
+                        log.severe("Error code not found for " + disapproved.getErrorCode());
                         return true;
                     }
 

@@ -103,7 +103,7 @@ final class NormalAuthenticationSituation extends Situation {
             @NotNull Result result = Result.readResult(stream, Duration.ofSeconds(2));
             if (result instanceof Disapproved disapproved) {
                 log.warn("Authentication rejected");
-                log.warn("code: " + disapproved.getCode());
+                log.warn("code: " + disapproved.getErrorCode());
                 log.warn("Reason: " + disapproved.getReason());
                 return true;
             }

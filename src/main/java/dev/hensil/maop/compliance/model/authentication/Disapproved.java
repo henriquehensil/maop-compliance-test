@@ -25,7 +25,7 @@ public final class Disapproved extends Result {
         }
     }
 
-    public short getCode() {
+    public short getErrorCode() {
         return this.code;
     }
 
@@ -49,7 +49,7 @@ public final class Disapproved extends Result {
             if (!super.equals(object)) {
                 return false;
             } else {
-                return this.getCode() == that.getCode() && Objects.equals(this.getReason(), that.getReason()) && Objects.equals(this.getRetryAfter(), that.getRetryAfter());
+                return this.getErrorCode() == that.getErrorCode() && Objects.equals(this.getReason(), that.getReason()) && Objects.equals(this.getRetryAfter(), that.getRetryAfter());
             }
         } else {
             return false;
@@ -57,7 +57,7 @@ public final class Disapproved extends Result {
     }
 
     public int hashCode() {
-        return Objects.hash(super.hashCode(), this.getCode(), this.getReason(), this.getRetryAfter());
+        return Objects.hash(super.hashCode(), this.getErrorCode(), this.getReason(), this.getRetryAfter());
     }
 
     public @NotNull String toString() {
