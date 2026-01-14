@@ -20,7 +20,7 @@ import java.awt.*;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.time.Duration;
+
 import java.util.Collection;
 import java.util.Map;
 import java.util.Set;
@@ -32,9 +32,24 @@ public final class Connection implements Closeable {
     // Static initializers
 
     private static final @NotNull Logger log = Logger.create("Connection");
+    private static final int GLOBAL_STREAM_LIMIT = 2;
+    private static final int STREAM_CREATED_BY_PEER_LIMIT = 3;
 
-    static final int GLOBAL_STREAM_LIMIT = 2;
-    static final int STREAM_CREATED_BY_PEER_LIMIT = 3;
+    private static void shutdown(@NotNull Connection connection) {
+        if (connection.isClosed()) {
+            return;
+        }
+
+        log.warn("Shutting down connection: " + connection);
+
+        try {
+            connection.close();
+        } catch (IOException e) {
+            log.warn("Error while closing connection: " + e);
+        }
+
+        connection.getCompliance().stop();
+    }
 
     // Objects
 
@@ -46,7 +61,6 @@ public final class Connection implements Closeable {
     private final @NotNull Map<Class<? extends DirectionalStream>, Set<DirectionalStream>> streams = new ConcurrentHashMap<>(3, 1f) {{
         this.put(BidirectionalStream.class, ConcurrentHashMap.newKeySet(16));
         this.put(UnidirectionalOutputStream.class, ConcurrentHashMap.newKeySet(16));
-        this.put(UnidirectionalInputStream.class, ConcurrentHashMap.newKeySet(16));
     }};
 
     private final @NotNull AtomicInteger streamCreateCount = new AtomicInteger(0);
@@ -78,7 +92,13 @@ public final class Connection implements Closeable {
         });
 
         connection.setStreamReadListener(GlobalStream.newGlobalListener(this));
-        //todo connection listener
+        connection.setConnectionListener(connectionTerminatedEvent -> {
+            log.warn("Connection terminate: " + this);
+            try {
+                this.close();
+            } catch (IOException ignore) {
+            }
+        });
     }
 
     // Getters
@@ -105,6 +125,10 @@ public final class Connection implements Closeable {
 
     @Nullable DirectionalStreamObserver getObserver(@NotNull DirectionalStream stream) {
         return observers.get(stream.getId());
+    }
+
+    @Nullable DirectionalStreamObserver getObserver(long streamId) {
+        return observers.get(streamId);
     }
 
     @NotNull Compliance getCompliance() {
@@ -148,7 +172,7 @@ public final class Connection implements Closeable {
             return;
         }
 
-        log.trace(Coloured.of("Authenticate connection (" + this + ")").color(Color.orange).print());
+        log.trace(Coloured.of("Authenticating connection (" + this + ")").color(Color.orange).print());
 
         @NotNull Authentication authentication = new Authentication(compliance.getPreset());
         @NotNull BidirectionalStream stream = createBidirectionalStream();
@@ -158,8 +182,14 @@ public final class Connection implements Closeable {
         stream.closeOutput();
 
         try {
-            @NotNull Duration timeout = Duration.ofSeconds(2);
-            @NotNull Result result = Result.readResult(stream, timeout);
+            log.debug("Written authentication and waiting for Result response");
+            long expectedBytes = 1 + (16 + 1 + 1) + (2 + 4 + 2 + 1) + 1 + 1 + 1 + 1;
+            long availableBytes;
+            do {
+                availableBytes = this.awaitReading(stream, 2, TimeUnit.SECONDS);
+            } while (availableBytes < expectedBytes);
+
+            @NotNull Result result = Result.readResult(stream);
             if (result instanceof Disapproved disapproved) {
                 throw new IOException("Authentication disapproved: " + disapproved);
             }
@@ -167,7 +197,9 @@ public final class Connection implements Closeable {
             setAuthenticated(true);
             log.trace(Coloured.of("Successfully authenticate connection (" + this + ")").color(Color.orange).print());
         } finally {
-            stream.close();
+            try {
+                stream.closeInput();
+            } catch (IOException ignore) {}
         }
     }
 
@@ -201,23 +233,14 @@ public final class Connection implements Closeable {
         } catch (CompletionException e) {
             if (e.getCause() instanceof TimeoutException) {
                 task.cancel(true);
-                log.severe("Unidirectional Stream creation timeout");
-
-                try {
-                    close();
-                } catch (IOException ex) {
-                    log.trace("Close connection failed: " + ex);
-                }
-
-                log.debug("Stopping compliance by connection (" + this + ")");
-                this.compliance.stop();
+                throw new DirectionalStreamException("Unidirectional Stream creation timeout", e.getCause());
             }
 
             if (e.getCause() instanceof IOException) {
-                throw new DirectionalStreamException("Cannot create unidirectional stream", e);
+                throw new DirectionalStreamException("Cannot create unidirectional stream", e.getCause());
             }
 
-            throw new AssertionError("Internal error");
+            throw new AssertionError("Internal error", e.getCause());
         }
     }
 
@@ -236,7 +259,7 @@ public final class Connection implements Closeable {
 
                 this.streams.get(BidirectionalStream.class).add(stream);
 
-                log.info(Coloured.of("New Bidirectional stream by connection (" + this + ") with id: " + stream.getId()).color(Color.orange).print());
+                log.info(Coloured.of("New Bidirectional stream created by connection (" + this + ") with id: " + stream.getId()).color(Color.orange).print());
                 if (timeExec > 1000) {
                     log.warn("The server takes " + timeExec + " ms to create a bidirectional stream");
                 }
@@ -300,6 +323,41 @@ public final class Connection implements Closeable {
     }
 
     @Blocking
+    public long awaitReading(@NotNull BidirectionalStream stream, int timeout, @NotNull TimeUnit unit) throws TimeoutException {
+        try {
+            long available = stream.available();
+            if (available > 0) {
+                return available;
+            }
+
+            @Nullable DirectionalStreamObserver observer = this.getObserver(stream);
+            if (observer == null) {
+                throw new AssertionError("Internal error");
+            }
+
+            if (!observer.isWaitReading()) {
+                observer.setWaitReading(true);
+            }
+
+            boolean success = observer.awaitReading(timeout, unit);
+            if (!success) {
+                throw new TimeoutException();
+            }
+
+            available = stream.available();
+            if (available == 0) {
+                throw new AssertionError("Internal error");
+            }
+
+            observer.setWaitReading(false);
+
+            return available;
+        } catch (IOException e) {
+            throw new AssertionError("Internal error", e);
+        }
+    }
+
+    @Blocking
     private @NotNull Operation await0(@NotNull DirectionalStream stream, int timeout, @NotNull TimeUnit timeUnit) throws IOException, TimeoutException, InterruptedException {
         @Nullable DirectionalStreamObserver observer = this.observers.get(stream.getId());
         if (observer == null) {
@@ -307,7 +365,7 @@ public final class Connection implements Closeable {
             log.trace("Non observable stream: " + stream);
         }
 
-        return observer.await(timeout, timeUnit);
+        return observer.awaitOperation(timeout, timeUnit);
     }
 
     /**

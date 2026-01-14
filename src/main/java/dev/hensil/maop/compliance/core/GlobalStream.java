@@ -32,7 +32,18 @@ public final class GlobalStream extends BidirectionalStream {
                 return;
             }
 
-            if (quicStream.isSelfInitiated()) return;
+            if (quicStream.isSelfInitiated()) {
+                @Nullable DirectionalStreamObserver observer = connection.getObserver(quicStream.getStreamId());
+                if (observer == null) {
+                    log.severe("Internal stream observer error");
+                    shutdown(connection);
+                    return;
+                }
+
+                if (observer.isWaitReading()) {
+                    observer.fireReading();
+                }
+            }
 
             log.info("New incoming stream: " + quicStream);
 
