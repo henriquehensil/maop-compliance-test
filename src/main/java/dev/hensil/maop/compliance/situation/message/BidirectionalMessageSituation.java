@@ -84,8 +84,8 @@ final class BidirectionalMessageSituation extends Situation {
             }
 
             @NotNull Set<MAOPError> expectedErrors = new HashSet<>() {{
-                this.add(MAOPError.INVALID_HEADER);
                 this.add(MAOPError.ILLEGAL_STREAM);
+                this.add(MAOPError.PROTOCOL_VIOLATION);
             }};
 
             if (!expectedErrors.contains(error)) {

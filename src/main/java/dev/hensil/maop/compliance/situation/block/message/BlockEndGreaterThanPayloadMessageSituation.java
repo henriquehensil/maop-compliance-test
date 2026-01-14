@@ -1,28 +1,32 @@
-package dev.hensil.maop.compliance.situation.block;
+package dev.hensil.maop.compliance.situation.block.message;
 
 import com.jlogm.Logger;
 
 import dev.hensil.maop.compliance.core.Connection;
 import dev.hensil.maop.compliance.core.UnidirectionalOutputStream;
 import dev.hensil.maop.compliance.exception.ConnectionException;
+import dev.hensil.maop.compliance.model.MAOPError;
 import dev.hensil.maop.compliance.model.operation.*;
 import dev.hensil.maop.compliance.situation.Situation;
-import dev.meinicke.plugin.annotation.Category;
+
 import dev.meinicke.plugin.annotation.Dependency;
 import dev.meinicke.plugin.annotation.Plugin;
+
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Plugin
-@Category("Situation")
-final class NormalBlockMessageSituation extends Situation {
+@Dependency(type = NormalBlockMessageSituation.class)
+final class BlockEndGreaterThanPayloadMessageSituation extends Situation {
 
-    private static final @NotNull Logger log = Logger.create(NormalBlockMessageSituation.class);
+    private static final @NotNull Logger log = Logger.create(BlockEndGreaterThanPayloadMessageSituation.class);
 
     // Objects
 
@@ -53,9 +57,11 @@ final class NormalBlockMessageSituation extends Situation {
 
             @NotNull Message message = new Message((short) 2, bytes.length, (byte) 0);
             @NotNull Block block = new Block(bytes);
-            @NotNull BlockEnd blockEnd = new BlockEnd(bytes.length);
 
-            log.info("Writing message operation");
+            int newLength = bytes.length + 20;
+            @NotNull BlockEnd blockEnd = new BlockEnd(newLength);
+
+            log.info("Writing message operation with payload: " + bytes.length);
             stream.write(message.toBytes());
             log.info("Successfully written");
 
@@ -73,19 +79,41 @@ final class NormalBlockMessageSituation extends Situation {
 
             log.info("Successfully written");
 
-            log.info("Writing block end operation");
+            log.info("Writing block end operation with payload greater: " + newLength);
             stream.write(blockEnd.toBytes());
 
             log.info("Successfully written");
 
-            log.info("Waiting for Done as response");
+            log.info("Waiting for Fail as response");
             operation = connection.await(stream, 2000, TimeUnit.SECONDS);
-            if (!(operation instanceof Done)) {
-                log.severe("Should be a Done but was " + operation.getClass().getSimpleName());
+            if (!(operation instanceof Fail fail)) {
+                log.severe("Should be a Fail but was " + operation.getClass().getSimpleName());
                 return true;
             }
 
-            log.info("Successfully done received!");
+            @NotNull Set<MAOPError> expectedErrors = new HashSet<>() {{
+                this.add(MAOPError.PAYLOAD_LENGTH_MISMATCH);
+                this.add(MAOPError.PROTOCOL_VIOLATION);
+            }};
+
+            @Nullable MAOPError error = MAOPError.get(fail.getError());
+            if (error == null) {
+                log.severe("error code not found: " + fail.getError());
+                return true;
+            }
+
+            if (!expectedErrors.contains(error)) {
+                log.warn("Error code \"" + error + "\" not suitable for the situation");
+                log.info("Error codes that may be suitable: " + expectedErrors);
+            }
+
+            log.info("Successfully fail received with reason: " + fail.getReasonToString());
+
+            try {
+                stream.close();
+            } catch (IOException e) {
+                log.warn("Cannot close unidirectional stream: " + e.getMessage());
+            }
 
             return false;
         } catch (ConnectionException e) {

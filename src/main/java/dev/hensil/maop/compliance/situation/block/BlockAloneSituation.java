@@ -12,7 +12,6 @@ import dev.hensil.maop.compliance.model.operation.Operation;
 import dev.hensil.maop.compliance.situation.Situation;
 
 import dev.meinicke.plugin.annotation.Category;
-import dev.meinicke.plugin.annotation.Dependency;
 import dev.meinicke.plugin.annotation.Plugin;
 
 import org.jetbrains.annotations.NotNull;
@@ -27,7 +26,6 @@ import java.util.concurrent.TimeoutException;
 
 @Plugin
 @Category("Situation")
-@Dependency(type = NormalBlockMessageSituation.class)
 final class BlockAloneSituation extends Situation {
 
     // Static initializers

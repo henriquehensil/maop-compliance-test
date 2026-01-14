@@ -3,6 +3,7 @@ package dev.hensil.maop.compliance.core;
 import com.jlogm.Logger;
 
 import com.jlogm.utils.Coloured;
+
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.situation.Situation;
 
@@ -155,14 +156,14 @@ public class Compliance {
     @NotNull Connection createConnection(@NotNull String name) throws ConnectionException {
         @Nullable Connection connection = getConnection(name);
         if (connection != null) {
-            log.trace("Close connection to be replacing for another connection name: " + connection);
+            log.trace("Close and removing connection to be replacing for another connection name: " + connection);
+            this.connections.remove(name);
+
             try {
                 connection.close();
             } catch (IOException e) {
                 log.trace("Cannot close connection: " + e);
             }
-
-            this.connections.remove(name);
         }
 
         @NotNull QuicClientConnection.Builder builder = QuicClientConnection.newBuilder()

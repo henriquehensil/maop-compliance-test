@@ -79,6 +79,7 @@ public final class UnidirectionalOutputStream extends DirectionalStream implemen
 
     @Override
     public void close() throws IOException {
+        super.close();
         this.outputStream.close();
     }
 }

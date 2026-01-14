@@ -175,6 +175,7 @@ public sealed class BidirectionalStream extends DirectionalStream implements Dat
 
     @Override
     public void close() throws IOException {
+        super.close();
         closeOutput();
         closeInput();
     }

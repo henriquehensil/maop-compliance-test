@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 
 @Plugin
@@ -57,8 +58,6 @@ final class InvalidVersionAuthenticationSituation extends Situation {
             this.add(MAOPError.INVALID_FORMAT);
             this.add(MAOPError.PROTOCOL_VIOLATION);
         }};
-
-        @NotNull Duration timeout = Duration.ofSeconds(2);
 
         @NotNull ByteBuffer buffer = authentication.toByteBuffer();
         int versionIndex = buffer.limit() - 4;
@@ -95,7 +94,14 @@ final class InvalidVersionAuthenticationSituation extends Situation {
                 @NotNull Result result;
                 try {
                     long currentMs = System.currentTimeMillis();
-                    result = Result.readResult(stream, timeout);
+
+                    long expectedBytes = 1 + (16 + 1 + 1) + (2 + 4 + 2 + 1) + 1 + 1 + 1 + 1;
+                    long availableBytes;
+                    do {
+                        availableBytes = connection.awaitReading(stream, 2, TimeUnit.SECONDS);
+                    } while (availableBytes < expectedBytes);
+                    result = Result.readResult(stream);
+
                     int totalTime = Math.toIntExact(System.currentTimeMillis() - currentMs);
 
                     // Show performance

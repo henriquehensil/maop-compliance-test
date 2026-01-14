@@ -71,7 +71,7 @@ public abstract class OperationUtil {
                 if (stream != null) {
                     @Nullable DirectionalStreamObserver observer = connection.getObserver(stream);
                     if (observer != null) {
-                        observer.fire(proceed);
+                        observer.fireOperation(proceed);
                     }
                 }
             }
@@ -103,7 +103,7 @@ public abstract class OperationUtil {
                 if (stream != null) {
                     @Nullable DirectionalStreamObserver observer = connection.getObserver(stream);
                     if (observer != null) {
-                        observer.fire(refuse);
+                        observer.fireOperation(refuse);
                     }
                 }
             }
@@ -162,7 +162,7 @@ public abstract class OperationUtil {
             if (stream != null) {
                 @Nullable DirectionalStreamObserver observer = connection.getObserver(stream);
                 if (observer != null) {
-                    observer.fire(fail);
+                    observer.fireOperation(fail);
                 }
             }
         }
@@ -190,7 +190,7 @@ public abstract class OperationUtil {
                 if (stream != null) {
                     @Nullable DirectionalStreamObserver observer = connection.getObserver(stream);
                     if (observer != null) {
-                        observer.fire(done);
+                        observer.fireOperation(done);
                     }
                 }
             }

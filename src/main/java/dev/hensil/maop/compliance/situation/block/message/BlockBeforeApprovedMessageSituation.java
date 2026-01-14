@@ -1,39 +1,40 @@
-package dev.hensil.maop.compliance.situation.block;
+package dev.hensil.maop.compliance.situation.block.message;
 
 import com.jlogm.Logger;
-
 import dev.hensil.maop.compliance.core.Connection;
 import dev.hensil.maop.compliance.core.UnidirectionalOutputStream;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.model.MAOPError;
-import dev.hensil.maop.compliance.model.operation.*;
+import dev.hensil.maop.compliance.model.operation.Block;
+import dev.hensil.maop.compliance.model.operation.Fail;
+import dev.hensil.maop.compliance.model.operation.Message;
+import dev.hensil.maop.compliance.model.operation.Operation;
 import dev.hensil.maop.compliance.situation.Situation;
-
+import dev.meinicke.plugin.annotation.Category;
 import dev.meinicke.plugin.annotation.Dependency;
 import dev.meinicke.plugin.annotation.Plugin;
-
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Plugin
+@Category("Situation")
 @Dependency(type = NormalBlockMessageSituation.class)
-final class BlockEndGreaterThanPayloadMessageSituation extends Situation {
+final class BlockBeforeApprovedMessageSituation extends Situation {
 
-    private static final @NotNull Logger log = Logger.create(BlockEndGreaterThanPayloadMessageSituation.class);
+    // Static initializers
+
+    private final @NotNull Logger log = Logger.create(BlockBeforeApprovedMessageSituation.class);
 
     // Objects
 
     @Override
     public boolean diagnostic() {
-        log.info("Starting diagnostics...");
-
         try {
             @Nullable Connection connection = getCompliance().getConnection("authentication");
             if (connection == null || !connection.isAuthenticated()) {
@@ -52,62 +53,49 @@ final class BlockEndGreaterThanPayloadMessageSituation extends Situation {
 
             @NotNull UnidirectionalOutputStream stream = connection.createUnidirectionalStream();
 
-            byte @NotNull [] bytes = new byte[200];
-            Arrays.fill(bytes, (byte) 0xAB);
-
+            byte @NotNull [] bytes = new byte[230];
             @NotNull Message message = new Message((short) 2, bytes.length, (byte) 0);
             @NotNull Block block = new Block(bytes);
 
-            int newLength = bytes.length + 20;
-            @NotNull BlockEnd blockEnd = new BlockEnd(newLength);
-
-            log.info("Writing message operation with payload: " + bytes.length);
+            log.info("Writing message operation");
             stream.write(message.toBytes());
-            log.info("Successfully written");
 
-            log.info("Waiting for Proceed as response");
-            @NotNull Operation operation = connection.await(stream, 2000, TimeUnit.SECONDS);
-            if (!(operation instanceof Proceed)) {
-                log.severe("Should be a Proceed but was " + operation.getClass().getSimpleName());
-                return true;
-            }
-
-            log.info("Proceed successfully received");
-
-            log.info("Writing block operation");
+            log.info("Writing block operation before Approved");
             stream.write(block.toBytes());
 
-            log.info("Successfully written");
+            log.info("Successfully written both operations");
 
-            log.info("Writing block end operation with payload greater: " + newLength);
-            stream.write(blockEnd.toBytes());
-
-            log.info("Successfully written");
-
-            log.info("Waiting for Fail as response");
-            operation = connection.await(stream, 2000, TimeUnit.SECONDS);
+            log.info("Waiting for fail response");
+            @NotNull Operation operation = connection.await(stream, 2000, TimeUnit.SECONDS);
             if (!(operation instanceof Fail fail)) {
                 log.severe("Should be a Fail but was " + operation.getClass().getSimpleName());
                 return true;
             }
 
-            @NotNull Set<MAOPError> expectedErrors = new HashSet<>() {{
-                this.add(MAOPError.PAYLOAD_LENGTH_MISMATCH);
-                this.add(MAOPError.PROTOCOL_VIOLATION);
-            }};
-
             @Nullable MAOPError error = MAOPError.get(fail.getError());
             if (error == null) {
-                log.severe("error code not found: " + fail.getError());
+                log.severe("Error code not found: " + fail.getError());
                 return true;
             }
+
+            @NotNull Set<MAOPError> expectedErrors = new HashSet<>() {{
+                this.add(MAOPError.ORDER_VIOLATION);
+                this.add(MAOPError.PROTOCOL_VIOLATION);
+            }};
 
             if (!expectedErrors.contains(error)) {
                 log.warn("Error code \"" + error + "\" not suitable for the situation");
                 log.info("Error codes that may be suitable: " + expectedErrors);
             }
 
-            log.info("Successfully fail received with reason: " + fail.getReasonToString());
+            log.info("Successfully Fail received");
+            log.info("Reason: " + fail.getReasonToString());
+
+            try {
+                stream.close();
+            } catch (IOException e) {
+                log.warn("Cannot close stream: " + e.getMessage());
+            }
 
             return false;
         } catch (ConnectionException e) {
@@ -121,10 +109,11 @@ final class BlockEndGreaterThanPayloadMessageSituation extends Situation {
             return true;
         } catch (InterruptedException e) {
             log.warn("Operation fail waiter interrupted");
-            return true;
         } catch (TimeoutException e) {
             log.severe("Fail waiter timeout");
             return true;
         }
+
+        return false;
     }
 }

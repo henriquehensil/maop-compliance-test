@@ -97,6 +97,7 @@ public final class UnidirectionalInputStream extends DirectionalStream implement
 
     @Override
     public void close() throws IOException {
+        super.close();
         inputStream.close();
     }
 

@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance.situation.block;
+package dev.hensil.maop.compliance.situation.block.message;
 
 import com.jlogm.Logger;
 
@@ -26,9 +26,9 @@ import java.util.concurrent.TimeoutException;
 @Plugin
 @Category("Situation")
 @Dependency(type = NormalBlockMessageSituation.class)
-final class BlockLessThatPayloadMessageSituation extends Situation {
+final class BlockLessThanPayloadMessageSituation extends Situation {
 
-    private static final @NotNull Logger log = Logger.create(BlockLessThatPayloadMessageSituation.class);
+    private static final @NotNull Logger log = Logger.create(BlockLessThanPayloadMessageSituation.class);
 
     // Objects
 
@@ -109,6 +109,12 @@ final class BlockLessThatPayloadMessageSituation extends Situation {
             }
 
             log.info("Successfully fail received with reason: " + fail.getReasonToString());
+
+            try {
+                stream.close();
+            } catch (IOException e) {
+                log.warn("Cannot close unidirectional stream: " + e.getMessage());
+            }
 
             return false;
         } catch (ConnectionException e) {

@@ -1,4 +1,4 @@
-package dev.hensil.maop.compliance.situation.block;
+package dev.hensil.maop.compliance.situation.block.message;
 
 import com.jlogm.Logger;
 
@@ -12,6 +12,7 @@ import dev.hensil.maop.compliance.situation.Situation;
 import dev.meinicke.plugin.annotation.Category;
 import dev.meinicke.plugin.annotation.Dependency;
 import dev.meinicke.plugin.annotation.Plugin;
+
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -96,6 +97,12 @@ final class BlockEndBeforeBlockMessageSituation extends Situation {
             }
 
             log.info("Successfully fail received with reason: " + fail.getReasonToString());
+
+            try {
+                stream.close();
+            } catch (IOException e) {
+                log.warn("Cannot close unidirectional stream: " + e.getMessage());
+            }
 
             return false;
         } catch (ConnectionException e) {

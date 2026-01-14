@@ -17,7 +17,7 @@ import dev.meinicke.plugin.annotation.Priority;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
-import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Plugin
@@ -100,7 +100,15 @@ final class NormalAuthenticationSituation extends Situation {
         log.info("Waiting for authentication response");
 
         try {
-            @NotNull Result result = Result.readResult(stream, Duration.ofSeconds(2));
+            {
+                long expectedBytes = 1 + (16 + 1 + 1) + (2 + 4 + 2 + 1) + 1 + 1 + 1 + 1;
+                long availableBytes;
+                do {
+                    availableBytes = connection.awaitReading(stream, 2, TimeUnit.SECONDS);
+                } while (availableBytes < expectedBytes);
+            }
+
+            @NotNull Result result = Result.readResult(stream);
             if (result instanceof Disapproved disapproved) {
                 log.warn("Authentication rejected");
                 log.warn("code: " + disapproved.getErrorCode());
@@ -128,7 +136,7 @@ final class NormalAuthenticationSituation extends Situation {
             log.severe("A error occurs while read result response from the server: " + e.getMessage());
             return true;
         } catch (TimeoutException e) {
-            log.severe("Authentication response timed out");
+            log.severe("Authentication result timed out");
             return true;
         }
     }

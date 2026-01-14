@@ -7,6 +7,7 @@ import org.jetbrains.annotations.Nullable;
 import tech.kwik.core.QuicStream;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.util.Objects;
 
 public abstract class DirectionalStream implements Closeable {
@@ -33,6 +34,12 @@ public abstract class DirectionalStream implements Closeable {
 
     protected final @NotNull Connection getConnection() {
         return connection;
+    }
+
+    @Override
+    @MustBeInvokedByOverriders
+    public void close() throws IOException {
+        this.connection.getStreams().get(this.getClass()).remove(this);
     }
 
     // Native
