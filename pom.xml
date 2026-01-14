@@ -12,7 +12,19 @@
         <dependency>
             <groupId>dev.meinicke</groupId>
             <artifactId>maop</artifactId>
-            <version>1.0.0</version>
+            <version>1.0</version>
+
+            <exclusions>
+                <exclusion>
+                    <groupId>tech.kwik</groupId>
+                    <artifactId>kwik</artifactId>
+                </exclusion>
+
+                <exclusion>
+                    <groupId>dev.meinicke</groupId>
+                    <artifactId>light-semver</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
