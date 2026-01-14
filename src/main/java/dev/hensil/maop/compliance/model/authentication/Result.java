@@ -33,94 +33,70 @@ public sealed class Result permits Disapproved, Approved {
     }
 
     @Blocking
-    public static @NotNull Result readResult(@NotNull BidirectionalStream stream, @NotNull Duration timeout) throws IOException, TimeoutException {
-        @NotNull CompletableFuture<Result> future = new CompletableFuture<>();
-        future.orTimeout(timeout.getNano(), TimeUnit.NANOSECONDS);
+    public static @NotNull Result readResult(@NotNull BidirectionalStream stream) throws IOException, TimeoutException {
+        int approvedByte = stream.readUnsignedByte();
+        boolean approved = approvedByte == 1;
+        UUID sessionId = null;
+        String identifier = null;
+        short code = 0;
+        Duration retryAfter = null;
+        String reason = null;
 
-        CompletableFuture.runAsync(() -> {
-            try {
-                int approvedByte = stream.readUnsignedByte();
-                boolean approved = approvedByte == 1;
-                UUID sessionId = null;
-                String identifier = null;
-                short code = 0;
-                Duration retryAfter = null;
-                String reason = null;
+        if (approved) {
+            long most = stream.readLong();
+            long least = stream.readLong();
+            sessionId = new UUID(most, least);
 
-                if (approved) {
-                    long most = stream.readLong();
-                    long least = stream.readLong();
-                    sessionId = new UUID(most, least);
+            int idLen = stream.readUnsignedByte();
+            byte[] idBytes = new byte[idLen];
 
-                    int idLen = stream.readUnsignedByte();
-                    byte[] idBytes = new byte[idLen];
+            stream.readFully(idBytes);
 
-                    stream.readFully(idBytes);
+            identifier = new String(idBytes, StandardCharsets.UTF_8);
+        } else {
+            code = stream.readShort();
+            int ms = stream.readInt();
 
-                    identifier = new String(idBytes, StandardCharsets.UTF_8);
-                } else {
-                    code = stream.readShort();
-                    int ms = stream.readInt();
-
-                    long msUnsigned = Integer.toUnsignedLong(ms);
-                    if (msUnsigned > 0L) {
-                        retryAfter = Duration.ofMillis(msUnsigned);
-                    }
-
-                    int reasonLen = stream.readUnsignedShort();
-                    if (reasonLen > 0) {
-                        byte[] reasonBytes = new byte[reasonLen];
-
-                        stream.readFully(reasonBytes);
-
-                        reason = new String(reasonBytes, StandardCharsets.UTF_8);
-                    }
-                }
-
-                int versionLen = stream.readUnsignedByte();
-                byte[] versionBytes = new byte[versionLen];
-
-                stream.readFully(versionBytes);
-
-                String versionString = new String(versionBytes, StandardCharsets.UTF_8);
-                Version version;
-
-                try {
-                    version = Version.parse(versionString);
-                } catch (Throwable e) {
-                    throw new IOException("Invalid version", e);
-                }
-
-                int vendorLen = stream.readUnsignedByte();
-                byte[] vendorBytes = new byte[vendorLen];
-
-                stream.readFully(vendorBytes);
-
-                String vendor = new String(vendorBytes, StandardCharsets.UTF_8);
-                if (approved) {
-                    future.complete(new Approved(version, vendor, sessionId, identifier));
-                    return;
-                }
-
-                future.complete(new Disapproved(version, vendor, code, reason, retryAfter));
-            } catch (Throwable e) {
-                future.completeExceptionally(e);
+            long msUnsigned = Integer.toUnsignedLong(ms);
+            if (msUnsigned > 0L) {
+                retryAfter = Duration.ofMillis(msUnsigned);
             }
-        });
+
+            int reasonLen = stream.readUnsignedShort();
+            if (reasonLen > 0) {
+                byte[] reasonBytes = new byte[reasonLen];
+
+                stream.readFully(reasonBytes);
+
+                reason = new String(reasonBytes, StandardCharsets.UTF_8);
+            }
+        }
+
+        int versionLen = stream.readUnsignedByte();
+        byte[] versionBytes = new byte[versionLen];
+
+        stream.readFully(versionBytes);
+
+        String versionString = new String(versionBytes, StandardCharsets.UTF_8);
+        Version version;
 
         try {
-            return future.join();
-        } catch (CompletionException e) {
-            if (e.getCause() instanceof TimeoutException to) {
-                throw to;
-            }
-
-            if (e.getCause() instanceof IOException io) {
-                throw io;
-            }
-
-            throw new AssertionError("Internal error", e);
+            version = Version.parse(versionString);
+        } catch (Throwable e) {
+            throw new IOException("Invalid version", e);
         }
+
+        int vendorLen = stream.readUnsignedByte();
+        byte[] vendorBytes = new byte[vendorLen];
+
+        stream.readFully(vendorBytes);
+
+        String vendor = new String(vendorBytes, StandardCharsets.UTF_8);
+        if (approved) {
+            return new Approved(version, vendor, sessionId, identifier);
+        }
+
+        return new Disapproved(version, vendor, code, reason, retryAfter);
     }
 
     @NotNull
