@@ -1,7 +1,8 @@
 package dev.hensil.maop.compliance.core;
 
 import com.jlogm.Logger;
-
+import com.jlogm.context.LogCtx;
+import com.jlogm.context.Stack;
 import com.jlogm.utils.Coloured;
 
 import dev.hensil.maop.compliance.exception.ConnectionException;
@@ -22,11 +23,11 @@ import tech.kwik.core.log.NullLogger;
 
 import java.awt.*;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.time.Duration;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * This class has no responsibility, and it doesn't exhibit any behavior for third-party Executors, except when it is initiated with its own Executor.
@@ -37,8 +38,8 @@ public class Compliance {
 
     // Static initializers
 
-    private static final @NotNull Logger log = Logger.create(Compliance.class);
-    private static final @NotNull Set<Situation> situations = new LinkedHashSet<>();
+    private static final @NotNull Logger log = Logger.create(Compliance.class).formatter(Main.FORMATTER);
+    static final @NotNull Set<Situation> situations = new LinkedHashSet<>();
 
     static {
         try {
@@ -62,10 +63,14 @@ public class Compliance {
 
     // Objects
 
+    private final @NotNull UUID uuid = UUID.randomUUID();
+
     private final @NotNull Preset preset;
     private final @NotNull Map<String, Connection> connections = new ConcurrentHashMap<>();
+
     private @NotNull Executor executor;
     private @NotNull CompletableFuture<Void> join = new CompletableFuture<>();
+
     private volatile boolean selfExecutor;
     private volatile boolean running;
 
@@ -85,12 +90,12 @@ public class Compliance {
 
     // Getters
 
-    public boolean isRunning() {
-        return running;
+    public @NotNull UUID getId() {
+        return uuid;
     }
 
-    @NotNull Executor getExecutor() {
-        return executor;
+    public boolean isRunning() {
+        return running;
     }
 
     public synchronized void setExecutor(@NotNull Executor executor) {
@@ -107,16 +112,25 @@ public class Compliance {
             @NotNull Thread thread = new Thread(r);
 
             thread.setUncaughtExceptionHandler((t, ex) -> {
-                if (running) {
-                    log.severe().log("Unexpected internal error: " + ex.getMessage());
-                    log.debug().cause(ex).log();
-                    this.stop();
+                try (
+                        @NotNull LogCtx.Scope logContext = LogCtx.builder()
+                                .put("compliance id", uuid)
+                                .put("running", running)
+                                .put("exception", ex)
+                                .install();
 
-                    return;
+                        @NotNull Stack.Scope logScope = Stack.pushScope("Uncaught exception handler");
+                ) {
+                    if (running) {
+                        log.severe("Unexpected internal error");
+                        log.debug().cause(ex).log();
+                        stop();
+
+                        return;
+                    }
+
+                    log.trace().cause(ex).log("Unexpected internal error occurs while stopping: " + ex);
                 }
-
-                log.trace("Unexpected internal error occurs while stopping: " + ex);
-                log.debug().cause(ex).log();
             });
 
             return thread;
@@ -144,130 +158,161 @@ public class Compliance {
     // Modules
 
     public @NotNull Connection createConnection(@NotNull String name, @NotNull Situation situation) throws ConnectionException {
-        log.info(Coloured.of("Creating new connection from the ").color(Color.yellow).print() + Coloured.of(situation.toString()).color(Color.CYAN).print());
-
-        @NotNull Connection connection = createConnection(name);
-
-        log.info(Coloured.of("Successfully connection created by ").color(Color.yellow).print() + Coloured.of(situation.getName()).color(Color.CYAN).print());
-
-        return connection;
+        try (
+                @NotNull LogCtx.Scope logContext = LogCtx.builder()
+                        .put("compliance id", uuid)
+                        .install();
+                @NotNull Stack.Scope logScope = Stack.pushScope("Create")
+        ) {
+            log.trace("Creating new connection from the " + situation);
+            @NotNull Connection connection = createConnection(name);
+            return connection;
+        }
     }
 
     @NotNull Connection createConnection(@NotNull String name) throws ConnectionException {
-        @Nullable Connection connection = getConnection(name);
-        if (connection != null) {
-            log.trace("Close and removing connection to be replacing for another connection name: " + connection);
-            this.connections.remove(name);
+        try (
+                @NotNull LogCtx.Scope logContext = LogCtx.builder()
+                        .put("running", running)
+                        .put("connection label", name)
+                        .install();
+                @NotNull Stack.Scope logScope = Stack.pushScope("Create connection")
+        ) {
+            @Nullable Connection connection = getConnection(name);
+            if (connection != null) {
+                log.trace("Closing and removing connection to be replacing for another connection name: " + connection);
+                this.connections.remove(name);
 
-            try {
-                connection.close();
-            } catch (IOException e) {
-                log.trace("Cannot close connection: " + e);
-            }
-        }
-
-        @NotNull QuicClientConnection.Builder builder = QuicClientConnection.newBuilder()
-                .uri(preset.getHost())
-                .applicationProtocol("maop/1")
-                .connectTimeout(Duration.ofSeconds(2))
-                .logger(new NullLogger());
-
-        if (preset.isServerNoCertification()) {
-            builder
-                    .noServerCertificateCheck();
-        } else {
-            builder
-                    .clientCertificate(preset.getCertificate())
-                    .clientCertificateKey(preset.getPrivateKey())
-                    .clientKeyManager(preset.getKeyStore())
-                    .clientKey(preset.getKeyPassword());
-        }
-
-        try {
-            @NotNull QuicClientConnection client = builder.build();
-
-            log.trace("Connecting in server.. (" + client + ")");
-
-            client.connect();
-
-            if (!client.isConnected()) {
-                throw new IOException("Cannot connect for unknown reason");
-            }
-
-            connection = new Connection(client, this);
-            this.connections.put(name, connection);
-
-            return connection;
-        } catch (IOException e) {
-            throw new ConnectionException(e);
-        } catch (Throwable e) {
-            throw new AssertionError("Internal error", e);
-        }
-    }
-
-    protected @NotNull Runnable getSituationRunnable() {
-        return () -> {
-            @NotNull Iterator<Situation> iterator = situations.iterator();
-
-            while (!Thread.currentThread().isInterrupted() || isRunning()) {
-                if (!iterator.hasNext()) {
-                    if (Thread.currentThread().isInterrupted() || !isRunning()) {
-                        break;
-                    }
-
-                    log.info("All diagnostics have been completed!");
-                    break;
-                }
-
-                @NotNull Situation situation = iterator.next();
-                log.info("Next diagnose: " + Coloured.of(situation.getName()).color(Color.CYAN).print());
-
-                boolean severe = situation.diagnostic();
-                if (severe) {
-                    if (running) {
-                        log.warn("The " + situation + " ended severely. Interrupting all diagnostics...");
-                    }
-
-                    break;
+                try {
+                    connection.close();
+                } catch (IOException e) {
+                    log.trace("Cannot close connection: " + e);
                 }
             }
 
-            if (Thread.currentThread().isInterrupted()) {
-                log.warn("Diagnostics were stopped abruptly");
-            }
+            @NotNull Duration timeout = Duration.ofSeconds(2);
 
-            stop();
-        };
+            try (
+                    @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
+                            .put("replaced", connection != null)
+                            .put("host", preset.getHost())
+                            .put("no certification", preset.isServerNoCertification())
+                            .put("connect timeout", timeout)
+                            .install();
+
+                    @NotNull Stack.Scope logScope2 = Stack.pushScope("Handle quic connection")
+            ) {
+                @NotNull QuicClientConnection.Builder builder = QuicClientConnection.newBuilder()
+                        .uri(preset.getHost())
+                        .applicationProtocol("maop/1")
+                        .connectTimeout(timeout)
+                        .logger(new NullLogger());
+
+                if (preset.isServerNoCertification()) {
+                    builder
+                            .noServerCertificateCheck();
+                } else {
+                    builder
+                            .clientCertificate(preset.getCertificate())
+                            .clientCertificateKey(preset.getPrivateKey())
+                            .clientKeyManager(preset.getKeyStore())
+                            .clientKey(preset.getKeyPassword());
+                }
+
+                try {
+                    @NotNull QuicClientConnection client = builder.build();
+                    log.trace("Connecting in server.. (" + client + ")");
+
+                    client.connect();
+
+                    if (!client.isConnected()) {
+                        throw new IOException("Cannot connect for unknown reason");
+                    }
+
+                    connection = new Connection(client, this);
+                    this.connections.put(name, connection);
+
+                    return connection;
+                } catch (IOException e) {
+                    throw new ConnectionException(e);
+                } catch (Throwable e) {
+                    throw new AssertionError("Internal error", e);
+                }
+            }
+        }
     }
 
     // Modules
 
     public synchronized void start() {
+        if (running) {
+            throw new IllegalStateException("Already running");
+        }
+
         if (situations.isEmpty()) {
             throw new AssertionError("Internal error");
         }
 
         this.running = true;
+        this.join = new CompletableFuture<>();
 
-        log.info("Initializing diagnostics...");
+        log.info("Initializing compliance diagnostics...");
 
         if (selfExecutor && ((ExecutorService) this.executor).isShutdown()) {
             this.executor = newDefaultExecutor();
         }
 
-        // Prepare situations
-        for (@NotNull Situation situation : situations) {
-            try {
-                @NotNull Field field = situation.getClass().getSuperclass().getDeclaredField("compliance");
-                field.setAccessible(true);
-                field.set(situation, this);
-            } catch (NoSuchFieldException | IllegalAccessException e) {
-                throw new AssertionError("Internal error", e);
+        try (
+                @NotNull LogCtx.Scope logContext = LogCtx.builder()
+                        .put("compliance id", uuid)
+                        .put("total situations", situations.size())
+                        .install();
+
+                @NotNull Stack.Scope logScope = Stack.pushScope("Starting compliance")
+        ) {
+            // Prepare situations
+
+            @NotNull Set<Situation> situations = new LinkedHashSet<>(Compliance.situations);
+            @NotNull AtomicBoolean canceled = new AtomicBoolean(false);
+
+            for (@NotNull Situation situation : situations) {
+                if (canceled.get() || Thread.currentThread().isInterrupted() || !running) {
+                    break;
+                }
+
+                this.executor.execute(() -> {
+                    try (
+                            @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
+                                    .put("remaining situations", situations.size())
+                                    .put("situation name", situation.getName())
+                                    .install();
+
+                            @NotNull Stack.Scope logScope2 = Stack.pushScope("Scheduling situation")
+                    ) {
+                        if (canceled.get() || !running) {
+                            return;
+                        }
+
+                        situations.remove(situation);
+
+                        log.info("Next situation: " + Coloured.of(situation.getName()).color(Color.CYAN).print());
+                        boolean severe = situation.diagnostic(this);
+
+                        if (severe && running) {
+                            log.severe("The " + situation + " ended severely. Interrupting all diagnostics...");
+                            canceled.set(true);
+                            stop();
+                            return;
+                        }
+
+                        if (situations.isEmpty()) {
+                            log.info("All diagnoses have been successfully completed");
+                            stop();
+                        }
+                    }
+                });
             }
         }
-
-        this.executor.execute(getSituationRunnable());
-        this.join = new CompletableFuture<>();
     }
 
     /**
@@ -298,14 +343,13 @@ public class Compliance {
             return;
         }
 
-        log.warn("Stopping diagnostics...");
+        log.warn("Closing compliance");
 
         this.running = false;
 
         for (@NotNull String key : this.connections.keySet()) {
             try {
                 @NotNull Connection connection = this.connections.remove(key);
-                log.debug("Close: " + connection);
                 connection.close();
             } catch (IOException e) {
                 log.trace("Cannot close connection while Compliance is stopping: " + e.getMessage());
@@ -316,7 +360,7 @@ public class Compliance {
             ((ExecutorService) this.executor).shutdownNow();
         }
 
-        log.info("Successfully stopped diagnostics");
+        log.info("Successfully close compliance");
 
         this.join.complete(null);
     }
