@@ -45,19 +45,16 @@ final class NormalAuthenticationSituation extends Situation {
         try (
                 @NotNull LogCtx.Scope logContext = LogCtx.builder()
                         .put("compliance id", compliance.getId())
+                        .put("situation name", getName())
                         .install();
 
                 @NotNull Stack.Scope logScope = Stack.pushScope("Authentication")
         ) {
-            log.info("Starting authentication diagnostic");
-
             log.info("Creating connection");
             connection = compliance.createConnection("authentication", this);
-            log.info("Connection successfully created");
 
             log.info("Creating bidirectional stream");
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
-            log.info("Bidirectional stream successfully created");
 
             try (
                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
@@ -101,7 +98,6 @@ final class NormalAuthenticationSituation extends Situation {
                     }
                 }
 
-                log.info("Closing authentication output stream");
                 try {
                     stream.closeOutput();
                 } catch (IOException e) {
@@ -113,10 +109,11 @@ final class NormalAuthenticationSituation extends Situation {
                     }
                 }
 
-                log.info("Waiting for Result as response");
+                log.info("Waiting for Result");
 
                 @NotNull Elapsed elapsed = new Elapsed();
-                @NotNull Result result = Result.readResult(stream, 5, TimeUnit.SECONDS);
+                connection.awaitReading(Result.MIN_LENGTH, stream, 3, TimeUnit.SECONDS);
+                @NotNull Result result = Result.readResult(stream, 2, TimeUnit.SECONDS);
                 elapsed.freeze();
 
                 try (
@@ -141,7 +138,6 @@ final class NormalAuthenticationSituation extends Situation {
 
                     // Shutdown
                     try {
-                        log.debug("Closing authentication input stream");
                         stream.closeInput();
                     } catch (IOException e) {
                         log.warn("Failed to close authentication input stream: " + e);
@@ -156,7 +152,7 @@ final class NormalAuthenticationSituation extends Situation {
                 }
             }
         } catch (TimeoutException e) {
-            log.severe("Result timed out: " + e.getMessage());
+            log.severe("Result read timed out: " + e.getMessage());
             return true;
         } catch (ConnectionException e) {
             log.severe("Failed to create authentication connection: " + e.getMessage());

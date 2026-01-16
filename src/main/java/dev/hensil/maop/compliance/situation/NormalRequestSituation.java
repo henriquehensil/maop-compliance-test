@@ -6,10 +6,7 @@ import com.jlogm.context.LogCtx;
 import com.jlogm.context.Stack;
 
 import dev.hensil.maop.compliance.Elapsed;
-import dev.hensil.maop.compliance.core.BidirectionalStream;
-import dev.hensil.maop.compliance.core.Compliance;
-import dev.hensil.maop.compliance.core.Connection;
-import dev.hensil.maop.compliance.core.OperationUtil;
+import dev.hensil.maop.compliance.core.*;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 
@@ -26,7 +23,10 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
+
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -37,7 +37,7 @@ final class NormalRequestSituation extends Situation {
 
     // Static initializers
 
-    private final @NotNull Logger log = Logger.create(NormalRequestSituation.class);
+    private final @NotNull Logger log = Logger.create(NormalRequestSituation.class).formatter(Main.FORMATTER);
 
     // Objects
 
@@ -50,9 +50,10 @@ final class NormalRequestSituation extends Situation {
         try (
                 @NotNull LogCtx.Scope logContext = LogCtx.builder()
                         .put("compliance id", compliance.getId())
+                        .put("situation name", getName())
                         .install();
 
-                @NotNull Stack.Scope logScope = Stack.pushScope("Authentication")
+                @NotNull Stack.Scope logScope = Stack.pushScope("Connection")
         ) {
             if (connection == null || !connection.isAuthenticated()) {
                 log.warn("Authenticated connection lost");
@@ -75,7 +76,7 @@ final class NormalRequestSituation extends Situation {
                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
                             .put("connection", connection)
                             .put("stream id", stream.getId())
-                            .put("message id", request.getMsgId())
+                            .put("request id", request.getMsgId())
                             .put("response id", request.getResponseId())
                             .put("request payload", request.getPayload())
                             .put("request timeout", request.getTimeout())
@@ -86,14 +87,13 @@ final class NormalRequestSituation extends Situation {
                 log.info("Writing Request operation");
                 stream.writeByte(request.getCode());
                 stream.write(request.toBytes());
-                log.info("Request operation successfully written");
 
                 try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
                     int expectedBytes = OperationUtil.RESPONSE.getHeaderLength() + 1;
 
-                    log.info("Waiting for Response operation on the same stream");
+                    log.info("Waiting for Response operation");
                     @NotNull Elapsed elapsed = new Elapsed();
-                    connection.awaitReadingUntilAvailable(expectedBytes, stream, 3, TimeUnit.SECONDS);
+                    connection.awaitReading(expectedBytes, stream, 3, TimeUnit.SECONDS);
                     elapsed.freeze();
 
                     byte code = stream.readByte();
@@ -133,44 +133,52 @@ final class NormalRequestSituation extends Situation {
                         @NotNull ByteBuffer successMessageBuffer = ByteBuffer.allocate((short) response.getPayload());
 
                         expectedBytes = OperationUtil.BLOCK.getHeaderLength() + 2;
-                        log.info("Waiting for Block operation to read success message");
+                        log.info("Waiting for Block operation");
                         elapsed = new Elapsed();
 
-                        connection.awaitReadingUntilAvailable(expectedBytes, stream, 3, TimeUnit.SECONDS);
+                        connection.awaitReading(expectedBytes, stream, 3, TimeUnit.SECONDS);
 
-                        log.info("Reading Block operation(s)");
                         int blocks = 0;
                         while (successMessageBuffer.remaining() > 0) {
-                            byte code2 = stream.readByte();
-                            @Nullable OperationUtil blockUtil = OperationUtil.getByCode(code2);
-                            if (blockUtil == null) {
-                                log.severe("There is not operation with code: " + code2);
-                                return true;
+                            try {
+                                byte code2 = stream.readByte();
+                                @Nullable OperationUtil blockUtil = OperationUtil.getByCode(code2);
+                                if (blockUtil == null) {
+                                    log.severe("There is not operation with code: " + code2);
+                                    return true;
+                                }
+
+                                if (blockUtil == OperationUtil.BLOCK_END) {
+                                    log.severe("Block end was received before reading all payload data (remaining = " + successMessageBuffer.remaining() + ")");
+                                    return true;
+                                }
+
+                                if (blockUtil != OperationUtil.BLOCK) {
+                                    log.severe("A Block operation was expected but it was " + code2 + " (" + blockUtil.getName() + ")");
+                                    return true;
+                                }
+
+                                int blockPayload = stream.readInt();
+                                if (blockPayload > response.getPayload()) {
+                                    log.severe("Block payload is greater than the declared response payload: (block payload = " + blockPayload + " & response payload = " + response.getPayload() + ")");
+                                    return true;
+                                }
+
+                                int total = successMessageBuffer.remaining() + blockPayload;
+                                if (total > response.getPayload()) {
+                                    throw new IOException("The number of blocks operations exceed the declared response payload (response payload = " + response.getPayload() + " & total read = " + total + ")");
+                                }
+
+                                connection.awaitReading(blockPayload, stream, 2, TimeUnit.SECONDS);
+
+                                byte @NotNull [] bytes = new byte[blockPayload];
+                                stream.readFully(bytes);
+                                successMessageBuffer.put(bytes);
+
+                                blocks++;
+                            } catch (BufferOverflowException e) {
+                                throw new IOException("The number of blocks operations exceed the declared response payload (response payload = " + response.getPayload() + ")");
                             }
-
-                            if (blockUtil == OperationUtil.BLOCK_END) {
-                                log.severe("Block end was received before reading all payload data (remaining = " + successMessageBuffer.remaining() + ")");
-                                return true;
-                            }
-
-                            if (blockUtil != OperationUtil.BLOCK) {
-                                log.severe("A Block operation was expected but it was " + code2 + " (" + util.getName() + ")");
-                                return true;
-                            }
-
-                            int blockPayload = stream.readInt();
-                            if (blockPayload > response.getPayload()) {
-                                log.severe("Block payload is greater than the declared response payload: (block payload = " + blockPayload + " & response payload = " + response.getPayload() + ")");
-                                return true;
-                            }
-
-                            connection.awaitReadingUntilAvailable(blockPayload, stream, 2, TimeUnit.SECONDS);
-
-                            byte @NotNull [] bytes = new byte[blockPayload];
-                            stream.readFully(bytes);
-                            successMessageBuffer.put(bytes);
-
-                            blocks++;
                         }
 
                         elapsed.freeze();
@@ -178,12 +186,10 @@ final class NormalRequestSituation extends Situation {
                             log.warn("It was necessary to read " + blocks + " blocks for a total of " + response.getPayload() + " payload data");
                         }
 
-                        log.info("Successfully Block operations read in " + elapsed);
                         log.info("Waiting for block end operation");
-
                         elapsed = new Elapsed();
                         expectedBytes = OperationUtil.BLOCK_END.getHeaderLength() + 1;
-                        connection.awaitReadingUntilAvailable(expectedBytes, stream, 2, TimeUnit.SECONDS);
+                        connection.awaitReading(expectedBytes, stream, 2, TimeUnit.SECONDS);
                         elapsed.freeze();
 
                         byte code2 = stream.readByte();
@@ -199,7 +205,10 @@ final class NormalRequestSituation extends Situation {
                         }
 
                         @NotNull BlockEnd blockEnd = (BlockEnd) blockEndUtil.read(stream);
-                        log.info("Successfully Block end received");
+                        if (blockEnd.getTotal() != response.getPayload()) {
+                            throw new IOException("Block end total bytes mismatch (block end total bytes = " + blockEnd.getTotal() + " & response payload = " + response.getPayload() + ")");
+                        }
+
                         log.info("The server takes " + elapsed + " to send block end");
 
                         try (@NotNull Stack.Scope scope = Stack.pushScope("Success message parse")) {
@@ -218,7 +227,13 @@ final class NormalRequestSituation extends Situation {
                             return true;
                         }
                     }
+                } catch (IOException e) {
+                    log.severe("Read failed: " + e);
+                    return true;
                 }
+            } catch (IOException e) {
+                log.severe("Write failed: " + e);
+                return true;
             }
         } catch (ConnectionException e) {
             log.severe("Failed to create connection: " + e.getMessage());
@@ -229,9 +244,6 @@ final class NormalRequestSituation extends Situation {
             }
 
             log.severe("Failed to create bidirectional stream: " + e.getMessage());
-            return true;
-        } catch (IOException e) {
-            log.trace("Failed while make I/O operations on the stream: " + e.getMessage());
             return true;
         } catch (ClassCastException e) {
             log.severe().cause(e).log("Internal error");

@@ -5,15 +5,15 @@ import com.jlogm.Logger;
 import com.jlogm.context.LogCtx;
 import com.jlogm.context.Stack;
 
-import dev.hensil.maop.compliance.Elapsed;
 import dev.hensil.maop.compliance.core.Compliance;
 import dev.hensil.maop.compliance.core.Connection;
 import dev.hensil.maop.compliance.core.Main;
 import dev.hensil.maop.compliance.core.UnidirectionalOutputStream;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
-import dev.hensil.maop.compliance.model.operation.Done;
-import dev.hensil.maop.compliance.model.operation.Message;
+import dev.hensil.maop.compliance.model.MAOPError;
+import dev.hensil.maop.compliance.model.operation.Block;
+import dev.hensil.maop.compliance.model.operation.Fail;
 import dev.hensil.maop.compliance.model.operation.Operation;
 
 import dev.meinicke.plugin.annotation.Category;
@@ -24,23 +24,26 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 @Plugin
 @Category("Situation")
-@Dependency(type = NormalAuthenticationSituation.class)
-final class NormalMessageSituation extends Situation {
+@Dependency(type = NormalBlockMessageSituation.class)
+final class BlockAloneUnidirectionalSituation extends Situation {
 
     // Static initializers
 
-    private final @NotNull Logger log = Logger.create(NormalMessageSituation.class).formatter(Main.FORMATTER);
+    private final @NotNull Logger log = Logger.create(BlockAloneUnidirectionalSituation.class).formatter(Main.FORMATTER);
 
-    // Objects
+    // Object
 
     @Override
     public boolean diagnostic(@NotNull Compliance compliance) {
-        @Nullable Connection connection = null;
+        @Nullable Connection connection = compliance.getConnection("authentication");
         try (
                 @NotNull LogCtx.Scope logContext = LogCtx.builder()
                         .put("compliance id", compliance.getId())
@@ -49,16 +52,11 @@ final class NormalMessageSituation extends Situation {
 
                 @NotNull Stack.Scope logScope = Stack.pushScope("Connection")
         ) {
-            log.info("Starting normal message diagnostics");
-
-            connection = compliance.getConnection("authentication");
             if (connection == null || !connection.isAuthenticated()) {
                 log.warn("Authenticated connection lost");
-
-                log.info("Creating new connection");
                 connection = compliance.createConnection("authentication", this);
 
-                log.info("Authenticating");
+                log.trace("Authenticating");
                 try {
                     connection.authenticate();
                     log.trace("Successfully authenticated");
@@ -68,56 +66,55 @@ final class NormalMessageSituation extends Situation {
                 }
             }
 
-            log.info("Creating unidirectional stream");
             @NotNull UnidirectionalOutputStream stream = connection.createUnidirectionalStream();
-            log.info("Unidirectional stream successfully created");
-
-            @NotNull Message message = new Message((short) 1, 0L, (byte) 0);
+            @NotNull Block block = new Block("Teste".getBytes(StandardCharsets.UTF_8));
 
             try (
                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
                             .put("connection", connection)
                             .put("stream id", stream.getId())
-                            .put("message payload", message.getPayload())
-                            .put("message id", message.getMsgId())
+                            .put("block payload", block.getPayload())
                             .install();
 
                     @NotNull Stack.Scope logScope2 = Stack.pushScope("Write")
             ) {
+                log.info("Writing standalone Block operation");
+                stream.write(block.getCode());
+                stream.write(block.getBytes());
 
-                log.info("Writing message operation");
-                stream.writeByte(message.getCode());
-                stream.write(message.toBytes());
-
-                try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read") ) {
-                    log.info("Waiting for Done signal");
-                    @NotNull Elapsed elapsed = new Elapsed();
+                try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
+                    log.info("Waiting for Fail signal");
                     @NotNull Operation operation = connection.awaitOperation(stream, 2, TimeUnit.SECONDS);
-                    elapsed.freeze();
-
-                    if (!(operation instanceof Done done)) {
-                        log.severe("A Done operation was expected but it was " + operation.getClass().getSimpleName());
+                    if (!(operation instanceof Fail fail)) {
+                        log.severe("Fail operation was expected but was " + operation.getClass().getSimpleName());
                         return true;
                     }
 
-                    log.info("The server took " + elapsed + " to send Done operation");
+                    @NotNull Set<MAOPError> expectedErrors = new HashSet<>() {{
+                        this.add(MAOPError.PAYLOAD_LENGTH_MISMATCH);
+                        this.add(MAOPError.PROTOCOL_VIOLATION);
+                    }};
 
-                    log.info("Done operation Successfully received");
-                    @NotNull Done.Entry @NotNull [] entries = done.getEntries();
-                    if (entries.length > 1) {
-                        log.warn("Done entries have a higher number than they should: " + entries.length);
+                    @Nullable MAOPError error = MAOPError.get(fail.getError());
+                    if (error == null) {
+                        log.severe("error code not found: " + fail.getError());
+                        return true;
                     }
+
+                    if (!expectedErrors.contains(error)) {
+                        log.warn("Error code \"" + error + "\" is not standard for this violation");
+                        log.info("Acceptable error codes for this situation: " + expectedErrors);
+                    }
+
+                    log.info("Successfully Fail operation received (reason = " + fail.getReasonToString() + ")");
 
                     try {
                         stream.close();
                     } catch (IOException e) {
-                        log.warn("Failure to close unidirectional stream" + e);
+                        log.warn("Cannot close unidirectional stream: " + e.getMessage());
                     }
 
                     return false;
-                } catch (IOException e) {
-                    log.severe("Read failed: " + e);
-                    return true;
                 }
             }
         } catch (ConnectionException e) {
@@ -128,17 +125,16 @@ final class NormalMessageSituation extends Situation {
                 log.severe("Connection lost during stream creation");
                 return true;
             }
-
             log.severe("Failed to create Unidirectional stream: " + e.getMessage());
             return true;
+        } catch (InterruptedException e) {
+            return false;
         } catch (IOException e) {
-            log.trace("Failed to write message operation: " + e.getMessage());
+            log.severe("Write failed: " + e.getMessage());
             return true;
         } catch (TimeoutException e) {
-            log.severe("Done waiting timeout: " + e.getMessage());
+            log.severe("Waiting fail operation timeout: " + e.getMessage());
             return true;
-        } catch (InterruptedException ignore) {
-            return false;
         }
     }
 }
