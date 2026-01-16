@@ -133,8 +133,12 @@ public abstract class OperationUtil {
         }
 
         @Override
-        public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
-            return null;
+        public @NotNull Block read(@NotNull DataInput dataInput) throws IOException {
+            int payload = dataInput.readInt();
+            byte @NotNull [] bytes = new byte[payload];
+            dataInput.readFully(bytes);
+
+            return new Block(bytes);
         }
     };
 
@@ -145,8 +149,8 @@ public abstract class OperationUtil {
         }
 
         @Override
-        public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
-            return null;
+        public @NotNull BlockEnd read(@NotNull DataInput dataInput) throws IOException {
+            return new BlockEnd(dataInput.readLong());
         }
     };
 

@@ -56,14 +56,14 @@ public final class Authentication {
     private final @NotNull String type;
     private final byte[] token;
     private final @NotNull Map<String, String> metadata;
-    private final @NotNull Version version;
+    private final @NotNull String version;
     private final @NotNull String vendor;
 
     public Authentication(@NotNull Preset preset) {
         this(preset.getAuthenticationType(), preset.getAuthenticationToken(), preset.getAuthenticationMetadata(), preset.getVersion(), preset.getVendor());
     }
 
-    public Authentication(@NotNull String type, byte[] token, @NotNull Map<String, String> metadata, @NotNull Version version, @NotNull String vendor) {
+    public Authentication(@NotNull String type, byte[] token, @NotNull Map<String, String> metadata, @NotNull String version, @NotNull String vendor) {
         this.type = type;
         this.token = token;
         this.metadata = Map.copyOf(metadata);
@@ -79,11 +79,15 @@ public final class Authentication {
             throw new IllegalArgumentException("the metadata key length cannot be higher than 65535.");
         } else if (metadata.values().stream().anyMatch((value) -> value.getBytes(StandardCharsets.UTF_8).length > 65535)) {
             throw new IllegalArgumentException("the metadata value length cannot be higher than 65535.");
-        } else if (version.toString().getBytes(StandardCharsets.UTF_8).length > 255) {
+        } else if (version.getBytes(StandardCharsets.UTF_8).length > 255) {
             throw new IllegalArgumentException("the version length cannot be higher than 255.");
         } else if (vendor.getBytes(StandardCharsets.UTF_8).length > 255) {
             throw new IllegalArgumentException("the vendor length cannot be higher than 255.");
         }
+    }
+
+    public Authentication(@NotNull String type, byte[] token, @NotNull Map<String, String> metadata, @NotNull Version version, @NotNull String vendor) {
+        this(type, token, metadata, version.toString(), vendor);
     }
 
     public @NotNull String getType() {
@@ -98,7 +102,7 @@ public final class Authentication {
         return this.metadata;
     }
 
-    public @NotNull Version getVersion() {
+    public @NotNull String getVersion() {
         return this.version;
     }
 
@@ -109,7 +113,7 @@ public final class Authentication {
     @NotNull
     public ByteBuffer toByteBuffer() {
         byte[] type = this.getType().getBytes(StandardCharsets.UTF_8);
-        byte[] version = this.getVersion().toString().getBytes(StandardCharsets.UTF_8);
+        byte[] version = this.getVersion().getBytes(StandardCharsets.UTF_8);
         byte[] vendor = this.getVendor().getBytes(StandardCharsets.UTF_8);
         int metadataCount = 0;
 
@@ -137,7 +141,7 @@ public final class Authentication {
             buffer.put(value);
         }
 
-        buffer.put((byte)version.length); // Aqui
+        buffer.put((byte)version.length);
         buffer.put(version);
         buffer.put((byte)vendor.length);
         buffer.put(vendor);

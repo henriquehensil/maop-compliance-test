@@ -6,14 +6,14 @@ import java.nio.ByteBuffer;
 
 public final class Block extends Operation {
 
-    private final long payload;
+    private final int payload;
     private final byte @NotNull [] bytes;
 
     public Block(byte @NotNull [] bytes) {
         this(bytes.length, bytes);
     }
 
-    public Block(long payload, byte @NotNull [] bytes) {
+    public Block(int payload, byte @NotNull [] bytes) {
         super((byte) 0x05);
         this.payload = payload;
         this.bytes = bytes;

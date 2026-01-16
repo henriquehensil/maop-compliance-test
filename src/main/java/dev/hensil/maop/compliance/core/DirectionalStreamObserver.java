@@ -75,12 +75,11 @@ final class DirectionalStreamObserver {
         }
     }
 
-    public @NotNull Operation awaitOperation(int timeout, @NotNull TimeUnit timeUnit) throws TimeoutException, InterruptedException {
-        @Nullable Operation operation = this.globalOperations.poll(timeout, timeUnit);
-        if (operation == null) {
-            throw new TimeoutException();
+    public @Nullable Operation awaitOperation(int timeout, @NotNull TimeUnit timeUnit) {
+        try {
+            return this.globalOperations.poll(timeout, timeUnit);
+        } catch (InterruptedException e) {
+            return null;
         }
-
-        return operation;
     }
 }
