@@ -32,7 +32,7 @@ public abstract class DirectionalStream implements Closeable {
         return stream;
     }
 
-    protected final @NotNull Connection getConnection() {
+    public final @NotNull Connection getConnection() {
         return connection;
     }
 

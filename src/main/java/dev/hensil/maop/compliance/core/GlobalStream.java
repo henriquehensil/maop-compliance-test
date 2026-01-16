@@ -57,7 +57,7 @@ public final class GlobalStream extends BidirectionalStream {
 
                     if (observer.isWaitReading()) {
                         log.trace("Firing new readings in the Observer (stream = " + quicStream + ")");
-                        observer.fireReading();
+                        observer.fireReading(length);
                     }
 
                     return;

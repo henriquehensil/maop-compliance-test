@@ -32,6 +32,8 @@ public sealed class Result permits Disapproved, Approved {
                 );
     }
 
+    public static int MIN_LENGTH = 1 + (16 + 1 + 1) + (2 + 4 + 2 + 1) + 1 + 1 + 1 + 1;
+
     @Blocking
     public static @NotNull Result readResult(@NotNull BidirectionalStream stream, int timeout, @NotNull TimeUnit unit) throws IOException, TimeoutException {
         @NotNull CompletableFuture<Result> future = new CompletableFuture<>();

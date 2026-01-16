@@ -1,10 +1,33 @@
 package dev.hensil.maop.compliance.model.operation;
 
-import org.jetbrains.annotations.NotNull;
+import dev.hensil.maop.compliance.core.BidirectionalStream;
+import dev.hensil.maop.compliance.core.Connection;
+import dev.hensil.maop.compliance.core.OperationUtil;
+import dev.hensil.maop.compliance.model.SuccessMessage;
 
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
+
+import java.io.IOException;
+import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public final class Request extends Operation {
+
+    // Static initializers
+
+    public static @NotNull SuccessMessage writeRequest(@NotNull BidirectionalStream stream) throws TimeoutException, IOException {
+        @NotNull Request request = new Request((short) 1, (short) 0, 0L, (byte) 0, 1000);
+
+        stream.write(request.getCode());
+        stream.write(request.toBytes());
+
+        return SuccessMessage.readAfterRequest(stream);
+    }
+
+    // Objects
 
     private final short msgId;
     private final short responseId;

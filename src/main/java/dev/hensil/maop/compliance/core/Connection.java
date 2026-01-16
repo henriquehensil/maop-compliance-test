@@ -336,20 +336,25 @@ public final class Connection implements Closeable {
 
     @Blocking
     public long awaitReading(@NotNull BidirectionalStream stream, int timeout, @NotNull TimeUnit unit) throws TimeoutException {
+        return awaitReading(0, stream, timeout, unit);
+    }
+
+    @Blocking
+    public long awaitReading(long untilAvailable, @NotNull BidirectionalStream stream, int timeout, @NotNull TimeUnit unit) throws TimeoutException {
+        @Nullable DirectionalStreamObserver observer = null;
+
         try {
             long available = stream.available();
-            if (available > 0) {
+            if (available >= untilAvailable) {
                 return available;
             }
 
-            @Nullable DirectionalStreamObserver observer = this.getObserver(stream);
+            observer = this.getObserver(stream);
             if (observer == null) {
                 throw new AssertionError("Internal error");
             }
 
-            if (!observer.isWaitReading()) {
-                observer.setWaitReading(true);
-            }
+            observer.setUntilAvailable(untilAvailable);
 
             boolean success = observer.awaitReading(timeout, unit);
             if (!success) {
@@ -361,32 +366,14 @@ public final class Connection implements Closeable {
                 throw new AssertionError("Internal error");
             }
 
-            observer.setWaitReading(false);
-
             return available;
-        } catch (IOException e) {
+        } catch (Throwable e) {
             throw new AssertionError("Internal error", e);
         }
     }
 
     @Blocking
-    public void awaitReadingUntilAvailable(long available, @NotNull BidirectionalStream stream, int timeout, @NotNull TimeUnit unit) throws TimeoutException {
-        try {
-            if (stream.available() >= available) {
-                return;
-            }
-
-            long bytes;
-            do {
-                bytes = awaitReading(stream, timeout, unit);
-            } while (bytes < available);
-        } catch (IOException e) {
-            throw new AssertionError("Internal error", e);
-        }
-    }
-
-    @Blocking
-    private @NotNull Operation await0(@NotNull DirectionalStream stream, int timeout, @NotNull TimeUnit timeUnit) throws IOException, TimeoutException, InterruptedException {
+    private @NotNull Operation await0(@NotNull DirectionalStream stream, int timeout, @NotNull TimeUnit timeUnit) throws TimeoutException {
         @Nullable DirectionalStreamObserver observer = this.observers.get(stream.getId());
         if (observer == null) {
             throw new AssertionError("Internal error");

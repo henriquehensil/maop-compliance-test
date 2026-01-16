@@ -5,12 +5,10 @@ import dev.hensil.maop.compliance.model.operation.Operation;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.io.IOException;
-
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 
 final class DirectionalStreamObserver {
 
@@ -19,6 +17,8 @@ final class DirectionalStreamObserver {
     private final @NotNull DirectionalStream stream;
     private final @NotNull LinkedBlockingQueue<Operation> globalOperations = new LinkedBlockingQueue<>(30);
 
+    private final @NotNull AtomicLong count = new AtomicLong(0);
+    private volatile long untilAvailable = 0;
     private volatile @NotNull CountDownLatch readWaiter = new CountDownLatch(0);
 
     // Constructor
@@ -44,34 +44,55 @@ final class DirectionalStreamObserver {
         }
     }
 
-    void fireReading() {
-        this.readWaiter.countDown();
-    }
-
-    boolean isWaitReading() {
-        return readWaiter.getCount() > 0;
-    }
-
-    void setWaitReading(boolean waitReading) {
-        if (waitReading) {
-            this.readWaiter = new CountDownLatch(1);
+    synchronized void fireReading(long newBytes) {
+        if (!isWaitReading()) {
             return;
         }
 
-        this.readWaiter = new CountDownLatch(0);
+        long total = this.count.addAndGet(newBytes);
+        if (total >= untilAvailable) {
+            this.readWaiter.countDown();
+            resetReading();
+        }
     }
 
-    public boolean awaitReading(int timeout, @NotNull TimeUnit unit) {
-        try {
-            if (stream.getQuicStream().getInputStream().available() > 0) {
-                return true;
-            }
+    synchronized boolean isWaitReading() {
+        return readWaiter.getCount() > 0;
+    }
 
+    private synchronized void setWaitReading(boolean waitReading) {
+        if (waitReading && !isWaitReading()) {
+            this.readWaiter = new CountDownLatch(1);
+        }
+    }
+
+    private synchronized void resetReading() {
+        setWaitReading(false);
+
+        this.untilAvailable = 0;
+        this.count.set(0);
+    }
+
+    synchronized void setUntilAvailable(long bytes) {
+        if (isWaitReading()) {
+            throw new IllegalStateException("Already waiting for available bytes: " + untilAvailable);
+        }
+
+        setWaitReading(true);
+        this.untilAvailable = bytes;
+    }
+
+    public synchronized boolean awaitReading(int timeout, @NotNull TimeUnit unit) {
+        if (!isWaitReading()) {
+            return false;
+        }
+
+        try {
             return this.readWaiter.await(timeout, unit);
-        } catch (IOException e) {
-            throw new AssertionError("Internal error");
         } catch (InterruptedException e) {
             return false;
+        } finally {
+            resetReading();
         }
     }
 
