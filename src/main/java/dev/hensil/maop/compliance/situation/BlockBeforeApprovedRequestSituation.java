@@ -19,6 +19,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -60,11 +62,24 @@ final class BlockBeforeApprovedRequestSituation extends Situation {
                 }
             }
 
+            log.info("Creating bidirectional stream");
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
 
             byte @NotNull [] bytes = new byte[230];
-            @NotNull Request request = new Request((short) 2, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
+            short messageId = (short) 1; // Test message
+            short responseId = (short) 0; // Success message
+            byte priority = (byte) 0;
+
+            @NotNull Request request = new Request(messageId, responseId, bytes.length, priority, 1000);
             @NotNull Block block = new Block(bytes);
+            byte @NotNull [] requestBytes = request.toBytes();
+            byte @NotNull [] blockBytes = block.toBytes();
+
+            //Merging
+            bytes = ByteBuffer.allocate(requestBytes.length + blockBytes.length)
+                    .put(requestBytes)
+                    .put(blockBytes)
+                    .array();
 
             try (
                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
@@ -79,12 +94,10 @@ final class BlockBeforeApprovedRequestSituation extends Situation {
 
                     @NotNull Stack.Scope logScope2 = Stack.pushScope("Write")
             ) {
-                log.info("Writing Request operation");
-                stream.writeByte(request.getCode());
+                log.info("Writing Request and Block operation together (Block is before Approved)");
+                stream.writeByte((byte) 0X01); // Request code
                 stream.write(request.toBytes());
-
-                log.info("Writing block operation before Approved");
-                stream.writeByte(block.getCode());
+                stream.writeByte((byte) 0x05); // Block code
                 stream.write(block.toBytes());
 
                 try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
@@ -132,8 +145,6 @@ final class BlockBeforeApprovedRequestSituation extends Situation {
             }
             log.severe("Failed to create Bidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
             return true;

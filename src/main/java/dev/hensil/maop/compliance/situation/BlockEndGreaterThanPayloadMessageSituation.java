@@ -149,8 +149,6 @@ final class BlockEndGreaterThanPayloadMessageSituation extends Situation {
             }
             log.severe("Failed to create Unidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
             return true;

@@ -131,9 +131,6 @@ final class RequestUnidirectionalStreamSituation extends Situation {
             }
             log.severe("Failed to create Unidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException ignore) {
-            Thread.currentThread().interrupt();
-            return false;
         } catch (TimeoutException e) {
             log.severe("Timeout waiting for Fail operation");
             return true;

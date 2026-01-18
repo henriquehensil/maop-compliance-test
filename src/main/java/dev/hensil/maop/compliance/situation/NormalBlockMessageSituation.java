@@ -137,9 +137,6 @@ final class NormalBlockMessageSituation extends Situation {
         } catch (IOException e) {
             log.severe("Write failed: " + e);
             return true;
-        } catch (InterruptedException e) {
-            log.warn("Operation fail waiter interrupted");
-            return true;
         }
     }
 }

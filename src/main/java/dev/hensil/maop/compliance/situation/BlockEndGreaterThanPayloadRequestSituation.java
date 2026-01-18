@@ -7,6 +7,7 @@ import com.jlogm.context.Stack;
 import dev.hensil.maop.compliance.core.BidirectionalStream;
 import dev.hensil.maop.compliance.core.Compliance;
 import dev.hensil.maop.compliance.core.Connection;
+import dev.hensil.maop.compliance.core.Main;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.model.MAOPError;
@@ -32,7 +33,7 @@ import java.util.concurrent.TimeoutException;
 @Dependency(type = NormalBlockRequestSituation.class)
 final class BlockEndGreaterThanPayloadRequestSituation extends Situation {
 
-    private static final @NotNull Logger log = Logger.create(BlockEndGreaterThanPayloadRequestSituation.class);
+    private static final @NotNull Logger log = Logger.create(BlockEndGreaterThanPayloadRequestSituation.class).formatter(Main.FORMATTER);
 
     // Objects
 
@@ -66,7 +67,7 @@ final class BlockEndGreaterThanPayloadRequestSituation extends Situation {
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
             byte @NotNull [] bytes = new byte[200];
             Arrays.fill(bytes, (byte) 0xAB);
-            @NotNull Request request = new Request((short) 2, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
+            @NotNull Request request = new Request((short) 1, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
             @NotNull Block block = new Block(bytes);
             int newLength = bytes.length + 20;
             @NotNull BlockEnd blockEnd = new BlockEnd(newLength);
@@ -152,8 +153,6 @@ final class BlockEndGreaterThanPayloadRequestSituation extends Situation {
             }
             log.severe("Failed to create Bidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
             return true;

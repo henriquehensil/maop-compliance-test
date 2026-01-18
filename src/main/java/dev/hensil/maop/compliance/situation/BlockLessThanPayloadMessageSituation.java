@@ -151,8 +151,6 @@ final class BlockLessThanPayloadMessageSituation extends Situation {
             }
             log.severe("Failed to create Unidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (TimeoutException e) {
             log.severe("Fail waiter timeout");
             return true;

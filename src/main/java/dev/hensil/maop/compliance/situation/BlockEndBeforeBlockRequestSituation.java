@@ -3,6 +3,7 @@ package dev.hensil.maop.compliance.situation;
 import com.jlogm.Logger;
 import com.jlogm.context.LogCtx;
 import com.jlogm.context.Stack;
+
 import dev.hensil.maop.compliance.core.BidirectionalStream;
 import dev.hensil.maop.compliance.core.Compliance;
 import dev.hensil.maop.compliance.core.Connection;
@@ -12,9 +13,11 @@ import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.model.MAOPError;
 import dev.hensil.maop.compliance.model.SuccessMessage;
 import dev.hensil.maop.compliance.model.operation.*;
+
 import dev.meinicke.plugin.annotation.Category;
 import dev.meinicke.plugin.annotation.Dependency;
 import dev.meinicke.plugin.annotation.Plugin;
+
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -62,10 +65,16 @@ final class BlockEndBeforeBlockRequestSituation extends Situation {
                 }
             }
 
+            log.info("Creating bidirectional stream");
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
-            int total = 200;
-            @NotNull Request request = new Request((short) 2, SuccessMessage.MESSAGE_ID, total, (byte) 0, 1000);
-            @NotNull BlockEnd blockEnd = new BlockEnd(total);
+
+            short messageId = (short) 1; // Test message
+            short responseId = (short) 0; // Success message
+            byte priority = (byte) 0;
+            int payload = 200;
+
+            @NotNull Request request = new Request(messageId, responseId, payload, priority, 1000);
+            @NotNull BlockEnd blockEnd = new BlockEnd(payload);
 
             try (
                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
@@ -81,7 +90,7 @@ final class BlockEndBeforeBlockRequestSituation extends Situation {
                     @NotNull Stack.Scope logScope2 = Stack.pushScope("Write")
             ) {
                 log.info("Writing Request operation");
-                stream.writeByte(request.getCode());
+                stream.writeByte((byte) 0x01); // Request operation
                 stream.write(request.toBytes());
 
                 log.info("Waiting for Proceed signal");
@@ -92,7 +101,7 @@ final class BlockEndBeforeBlockRequestSituation extends Situation {
                 }
 
                 log.info("Writing block end operation before");
-                stream.writeByte(blockEnd.getCode());
+                stream.writeByte((byte) 0x06); // Block operation
                 stream.write(blockEnd.toBytes());
 
                 try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
@@ -143,8 +152,6 @@ final class BlockEndBeforeBlockRequestSituation extends Situation {
             }
             log.severe("Failed to create Bidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
             return true;

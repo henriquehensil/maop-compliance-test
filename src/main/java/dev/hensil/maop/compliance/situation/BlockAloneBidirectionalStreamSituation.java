@@ -62,6 +62,7 @@ final class BlockAloneBidirectionalStreamSituation extends Situation {
                 }
             }
 
+            log.info("Creating bidirectional stream");
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
             @NotNull Block block = new Block("Teste".getBytes(StandardCharsets.UTF_8));
 
@@ -75,8 +76,8 @@ final class BlockAloneBidirectionalStreamSituation extends Situation {
                     @NotNull Stack.Scope logScope2 = Stack.pushScope("Write")
             ) {
                 log.info("Writing standalone Block operation");
-                stream.write(block.getCode());
-                stream.write(block.getBytes());
+                stream.write((byte) 0x05);
+                stream.write(block.toBytes());
 
                 try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
                     log.info("Waiting for Fail signal");
@@ -87,7 +88,7 @@ final class BlockAloneBidirectionalStreamSituation extends Situation {
                     }
 
                     @NotNull Set<MAOPError> expectedErrors = new HashSet<>() {{
-                        this.add(MAOPError.PAYLOAD_LENGTH_MISMATCH);
+                        this.add(MAOPError.ORDER_VIOLATION);
                         this.add(MAOPError.PROTOCOL_VIOLATION);
                     }};
 
@@ -123,13 +124,16 @@ final class BlockAloneBidirectionalStreamSituation extends Situation {
             }
             log.severe("Failed to create Bidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
             return true;
         } catch (TimeoutException e) {
             log.severe("Waiting fail operation timeout: " + e.getMessage());
+
+            if (!connection.isClosed()) {
+                log.warn("Connection still alive");
+            }
+
             return true;
         }
     }

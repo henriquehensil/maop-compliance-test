@@ -137,8 +137,6 @@ final class NormalMessageSituation extends Situation {
         } catch (TimeoutException e) {
             log.severe("Done waiting timeout: " + e.getMessage());
             return true;
-        } catch (InterruptedException ignore) {
-            return false;
         }
     }
 }

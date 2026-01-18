@@ -67,8 +67,13 @@ final class MessageBidirectionalStreamSituation extends Situation {
                 }
             }
 
+            log.info("Creating bidirectional stream");
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
-            @NotNull Message message = new Message((short) 1, 0L, (byte) 0);
+
+            short testMessageId = (short) 1;
+            int payload = 0;
+            byte priority = 0;
+            @NotNull Message message = new Message(testMessageId, payload, priority);
 
             try (
                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
@@ -81,7 +86,7 @@ final class MessageBidirectionalStreamSituation extends Situation {
                     @NotNull Stack.Scope logScope2 = Stack.pushScope("Write")
             ) {
                 log.info("Writing message operation");
-                stream.writeByte(message.getCode());
+                stream.writeByte((byte) 0x00); // Message operation code
                 stream.write(message.toBytes());
 
                 try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
@@ -139,8 +144,6 @@ final class MessageBidirectionalStreamSituation extends Situation {
         } catch (TimeoutException e) {
             log.severe("Timeout waiting for Fail operation");
             return true;
-        } catch (InterruptedException e) {
-            return false;
         }
     }
 }

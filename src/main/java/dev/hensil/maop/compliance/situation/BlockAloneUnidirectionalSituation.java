@@ -80,7 +80,7 @@ final class BlockAloneUnidirectionalSituation extends Situation {
             ) {
                 log.info("Writing standalone Block operation");
                 stream.write(block.getCode());
-                stream.write(block.getBytes());
+                stream.write(block.toBytes());
 
                 try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
                     log.info("Waiting for Fail signal");
@@ -127,8 +127,6 @@ final class BlockAloneUnidirectionalSituation extends Situation {
             }
             log.severe("Failed to create Unidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
             return true;

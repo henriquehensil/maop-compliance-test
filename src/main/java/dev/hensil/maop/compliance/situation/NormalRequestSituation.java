@@ -11,9 +11,7 @@ import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 
 import dev.hensil.maop.compliance.model.SuccessMessage;
-import dev.hensil.maop.compliance.model.operation.BlockEnd;
-import dev.hensil.maop.compliance.model.operation.Request;
-import dev.hensil.maop.compliance.model.operation.Response;
+import dev.hensil.maop.compliance.model.operation.*;
 
 import dev.meinicke.plugin.annotation.Category;
 import dev.meinicke.plugin.annotation.Dependency;
@@ -27,8 +25,10 @@ import java.io.IOException;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.locks.LockSupport;
 
 @Plugin
 @Category("Situation")
@@ -70,7 +70,7 @@ final class NormalRequestSituation extends Situation {
             }
 
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
-            @NotNull Request request = new Request((short) 1, (short) 0, 0L, (byte) 0, 1000);
+            @NotNull Request request = new Request((short) 1, SuccessMessage.MESSAGE_ID, 0L, (byte) 0, 1000);
 
             try (
                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
@@ -89,6 +89,13 @@ final class NormalRequestSituation extends Situation {
                 stream.write(request.toBytes());
 
                 try (@NotNull Stack.Scope logScope3 = Stack.pushScope("Read")) {
+                    log.info("Waiting for Proceed operation");
+                    @NotNull Operation proceed = connection.awaitOperation(stream, 2, TimeUnit.SECONDS);
+                    if (!(proceed instanceof Proceed)) {
+                        log.severe("Proceed was expected but it was " + proceed.getClass().getSimpleName());
+                        return true;
+                    }
+
                     int expectedBytes = OperationUtil.RESPONSE.getHeaderLength() + 1;
 
                     log.info("Waiting for Response operation");

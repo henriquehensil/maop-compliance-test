@@ -7,6 +7,7 @@ import com.jlogm.context.Stack;
 import dev.hensil.maop.compliance.core.BidirectionalStream;
 import dev.hensil.maop.compliance.core.Compliance;
 import dev.hensil.maop.compliance.core.Connection;
+import dev.hensil.maop.compliance.core.Main;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.model.SuccessMessage;
@@ -29,7 +30,7 @@ import java.util.concurrent.TimeoutException;
 @Dependency(type = NormalAuthenticationSituation.class)
 public class NormalBlockRequestSituation extends Situation {
 
-    private static final @NotNull Logger log = Logger.create(NormalBlockRequestSituation.class);
+    private static final @NotNull Logger log = Logger.create(NormalBlockRequestSituation.class).formatter(Main.FORMATTER);
 
     // Objects
 
@@ -60,12 +61,17 @@ public class NormalBlockRequestSituation extends Situation {
                 }
             }
 
+            log.info("Creating bidirectional stream");
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
 
             byte @NotNull [] bytes = new byte[200];
             Arrays.fill(bytes, (byte) 0xAB);
 
-            @NotNull Request request = new Request((short) 2, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
+            short TestMessageId = (short) 1; // Test message
+            short responseId = (short) 0; // Success message
+            byte priority = (byte) 0;
+
+            @NotNull Request request = new Request(TestMessageId, responseId, bytes.length, priority, 1000);
             @NotNull Block block = new Block(bytes);
             @NotNull BlockEnd blockEnd = new BlockEnd(bytes.length);
 
@@ -83,7 +89,7 @@ public class NormalBlockRequestSituation extends Situation {
                     @NotNull Stack.Scope scope2 = Stack.pushScope("Write")
             ) {
                 log.info("Writing Request operation");
-                stream.writeByte(request.getCode());
+                stream.writeByte((byte) 0X01); // Request code
                 stream.write(request.toBytes());
 
                 log.info("Waiting for Proceed signal");
@@ -94,15 +100,15 @@ public class NormalBlockRequestSituation extends Situation {
                 }
 
                 log.info("Writing Block operation");
-                stream.write(block.getCode());
+                stream.writeByte((byte) 0x05); // Block code
                 stream.write(block.toBytes());
 
                 log.info("Writing BlockEnd operation");
-                stream.writeByte(blockEnd.getCode());
+                stream.writeByte((byte) 0x06); // Block end code
                 stream.write(blockEnd.toBytes());
 
                 try (@NotNull Stack.Scope scope1 = Stack.pushScope("Read")) {
-                    log.info("Waiting for success message");
+                    log.info("Waiting for Response operation with SuccessMessage");
 
                     @NotNull SuccessMessage message = SuccessMessage.readAfterRequest(stream);
                     log.info("Successfully received SuccessMessage (payload = " + message.getBody().length + ")");
@@ -139,8 +145,6 @@ public class NormalBlockRequestSituation extends Situation {
         } catch (IOException e) {
             log.severe("Write failed: " + e);
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (TimeoutException e) {
             log.severe("Timeout waiting for Proceed operation");
             return true;

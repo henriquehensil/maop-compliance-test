@@ -69,7 +69,7 @@ final class BlockLessThanPayloadRequestSituation extends Situation {
             byte @NotNull [] bytes = new byte[200];
             Arrays.fill(bytes, (byte) 0xAB);
 
-            @NotNull Request request = new Request((short) 2, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
+            @NotNull Request request = new Request((short) 1, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
             int newLength = bytes.length - 20;
             @NotNull Block block = new Block(newLength, Arrays.copyOf(bytes, newLength));
             @NotNull BlockEnd blockEnd = new BlockEnd(newLength);
@@ -140,6 +140,9 @@ final class BlockLessThanPayloadRequestSituation extends Situation {
                     }
 
                     return false;
+                } catch (TimeoutException e) {
+                    log.severe("Waiting Fail timeout: " + e.getMessage());
+                    return true;
                 }
             }
         } catch (ConnectionException e) {
@@ -152,13 +155,11 @@ final class BlockLessThanPayloadRequestSituation extends Situation {
             }
             log.severe("Failed to create Bidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
-        } catch (TimeoutException e) {
-            log.severe("Fail waiter timeout");
-            return true;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
+            return true;
+        } catch (TimeoutException e) {
+            log.severe("Waiting Proceed timeout: " + e.getMessage());
             return true;
         }
     }

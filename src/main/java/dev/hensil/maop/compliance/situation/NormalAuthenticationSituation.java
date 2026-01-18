@@ -79,9 +79,8 @@ final class NormalAuthenticationSituation extends Situation {
 
                         @NotNull Stack.Scope logScope2 = Stack.pushScope("Write")
                 ) {
-                    log.info("Sending authentication");
+                    log.info("Writing authentication");
                     stream.write(data);
-                    log.info("Authentication sent successfully");
                 } catch (IOException e) {
                     if (connection.isConnected()) {
                         log.warn("Write failed, retrying once");
@@ -158,7 +157,7 @@ final class NormalAuthenticationSituation extends Situation {
             log.severe("Failed to create authentication connection: " + e.getMessage());
             return true;
         } catch (DirectionalStreamException e) {
-            log.severe("Failed to create bidirectional authentication stream: " + e);
+            log.severe("Failed to create bidirectional authentication stream: " + e.getMessage());
 
             if (!connection.isConnected()) {
                 log.warn("Connection was closed before authentication could start");

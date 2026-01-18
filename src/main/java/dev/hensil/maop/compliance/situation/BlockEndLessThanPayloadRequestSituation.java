@@ -67,7 +67,7 @@ final class BlockEndLessThanPayloadRequestSituation extends Situation {
             @NotNull BidirectionalStream stream = connection.createBidirectionalStream();
             byte @NotNull [] bytes = new byte[200];
             Arrays.fill(bytes, (byte) 0xAB);
-            @NotNull Request request = new Request((short) 2, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
+            @NotNull Request request = new Request((short) 1, SuccessMessage.MESSAGE_ID, bytes.length, (byte) 0, 1000);
             @NotNull Block block = new Block(bytes);
             int newLength = bytes.length - 20;
             @NotNull BlockEnd blockEnd = new BlockEnd(newLength);
@@ -153,8 +153,6 @@ final class BlockEndLessThanPayloadRequestSituation extends Situation {
             }
             log.severe("Failed to create Bidirectional stream: " + e.getMessage());
             return true;
-        } catch (InterruptedException e) {
-            return false;
         } catch (IOException e) {
             log.severe("Write failed: " + e.getMessage());
             return true;

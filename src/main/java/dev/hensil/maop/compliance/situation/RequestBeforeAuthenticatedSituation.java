@@ -7,6 +7,7 @@ import dev.hensil.maop.compliance.Elapsed;
 import dev.hensil.maop.compliance.core.BidirectionalStream;
 import dev.hensil.maop.compliance.core.Compliance;
 import dev.hensil.maop.compliance.core.Connection;
+import dev.hensil.maop.compliance.core.Main;
 import dev.hensil.maop.compliance.exception.ConnectionException;
 import dev.hensil.maop.compliance.exception.DirectionalStreamException;
 import dev.hensil.maop.compliance.model.authentication.Result;
@@ -32,7 +33,7 @@ final class RequestBeforeAuthenticatedSituation extends Situation {
 
     // Static initializers
 
-    private final @NotNull Logger log = Logger.create(RequestBeforeAuthenticatedSituation.class);
+    private final @NotNull Logger log = Logger.create(RequestBeforeAuthenticatedSituation.class).formatter(Main.FORMATTER);
 
     @Override
     public boolean diagnostic(@NotNull Compliance compliance) {
@@ -65,7 +66,7 @@ final class RequestBeforeAuthenticatedSituation extends Situation {
                     @NotNull Stack.Scope logScope2 = Stack.pushScope("Write")
             ) {
                 log.info("Writing Request operation");
-                stream.write(request.getCode());
+                stream.writeByte((byte) 0x01);
                 stream.write(request.toBytes());
 
                 log.info("Waiting for server reaction");
