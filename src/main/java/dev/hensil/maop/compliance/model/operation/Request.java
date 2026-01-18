@@ -1,17 +1,12 @@
 package dev.hensil.maop.compliance.model.operation;
 
 import dev.hensil.maop.compliance.core.BidirectionalStream;
-import dev.hensil.maop.compliance.core.Connection;
-import dev.hensil.maop.compliance.core.OperationUtil;
 import dev.hensil.maop.compliance.model.SuccessMessage;
 
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
-import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 public final class Request extends Operation {
@@ -68,9 +63,9 @@ public final class Request extends Operation {
     public byte @NotNull [] toBytes() {
         return ByteBuffer.allocate(2 + 2 + 8 + 1 + 4)
                 .putShort(msgId)
-                .putShort(responseId)
                 .putLong(payload)
                 .put(priority)
+                .putShort(responseId)
                 .putInt(timeout)
                 .array();
     }

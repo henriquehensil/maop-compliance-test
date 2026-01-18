@@ -9,6 +9,7 @@ import java.io.DataInput;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -25,7 +26,12 @@ public abstract class OperationUtil {
         }
 
         @Override
-        public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public @NotNull Operation read(@NotNull DataInput dataInput) {
             return null;
         }
     };
@@ -36,8 +42,12 @@ public abstract class OperationUtil {
             throw new UnsupportedOperationException();
         }
 
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) {
+            throw new UnsupportedOperationException();
+        }
+
         @Override
-        public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
+        public @NotNull Operation read(@NotNull DataInput dataInput) {
             return null;
         }
     };
@@ -45,6 +55,10 @@ public abstract class OperationUtil {
     public static final @NotNull OperationUtil RESPONSE = new OperationUtil((byte) 0x02, Response.class, 20) {
         @Override
         void handleObserve(@NotNull Operation operation, @NotNull Connection connection) {
+            throw new UnsupportedOperationException();
+        }
+
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) {
             throw new UnsupportedOperationException();
         }
 
@@ -58,7 +72,8 @@ public abstract class OperationUtil {
         }
     };
 
-    public static final @NotNull OperationUtil PROCEED = new OperationUtil((byte) 0x03, Proceed.class, 2) {
+    public static final @NotNull OperationUtil PROCEED = new OperationUtil((byte) 0x03, Proceed.class, 8 * 5) {
+
         @Override
         void handleObserve(@NotNull Operation operation, @NotNull Connection connection) {
             if (!(operation instanceof Proceed proceed)) {
@@ -77,9 +92,43 @@ public abstract class OperationUtil {
             }
         }
 
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) throws IOException {
+            @Nullable ByteBuffer buffer = stream.getBuffer();
+            short count = -1;
+            if (buffer == null) {
+                count = stream.readShort();
+                if (count > getHeaderLength() / 8) {
+                    throw new IllegalArgumentException("Proceed stream count is too long: " + count);
+                }
+
+                int header = Short.BYTES + (count * 8);
+                buffer = ByteBuffer.allocate(header);
+                buffer.putShort(count);
+            }
+
+            if (stream.available() < buffer.remaining()) {
+                return buffer;
+            }
+
+            count = count == -1 ? buffer.getShort(0) : count;
+            for (short i = 0; i < count; i++) {
+                buffer.putLong(stream.readLong());
+            }
+
+            if (buffer.remaining() == 0) {
+                buffer.flip();
+                stream.complete();
+            }
+
+            return buffer;
+        }
+
         @Override
         public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
             short count = dataInput.readShort();
+            if (count > getHeaderLength() / 8) {
+                throw new UnsupportedOperationException("Proceed stream count is too long: " + count);
+            }
 
             @NotNull Proceed.Entry[] entries = new Proceed.Entry[count];
             for (int i = 0; i < entries.length; i++) {
@@ -90,7 +139,7 @@ public abstract class OperationUtil {
         }
     };
 
-    public static final @NotNull OperationUtil REFUSE = new OperationUtil((byte) 0x04, Refuse.class, 2) {
+    public static final @NotNull OperationUtil REFUSE = new OperationUtil((byte) 0x04, Refuse.class, 5 * 14) {
         @Override
         void handleObserve(@NotNull Operation operation, @NotNull Connection connection) throws ClassCastException {
             if (!(operation instanceof Refuse refuse)) {
@@ -109,9 +158,45 @@ public abstract class OperationUtil {
             }
         }
 
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) throws IOException {
+            @Nullable ByteBuffer buffer = stream.getBuffer();
+            short count = -1;
+            if (buffer == null) {
+                count = stream.readShort();
+                if (count > getHeaderLength() / 14) {
+                    throw new IllegalArgumentException("Refuse entry count is too long: " + count);
+                }
+
+                int header = Short.BYTES + (count * 14);
+                buffer = ByteBuffer.allocate(header);
+                buffer.putShort(count);
+            }
+
+            if (stream.available() < buffer.remaining()) {
+                return buffer;
+            }
+
+            count = count == -1 ? buffer.getShort(0) : count;
+            for (short i = 0; i < count; i++) {
+                buffer.putLong(stream.readLong()); // stream id
+                buffer.putInt(stream.readInt()); // retry after
+                buffer.putShort(stream.readShort()); // reason code
+            }
+
+            if (buffer.remaining() == 0) {
+                buffer.flip();
+                stream.complete();
+            }
+
+            return buffer;
+        }
+
         @Override
         public @NotNull Refuse read(@NotNull DataInput dataInput) throws IOException {
             short count = dataInput.readShort();
+            if (count > getHeaderLength() / 14) {
+                throw new IllegalArgumentException("Refuse entry count is too long: " + count);
+            }
 
             @NotNull List<Refuse.Entry> entries = new ArrayList<>();
             for (int i = 0; i < count; i++) {
@@ -132,6 +217,10 @@ public abstract class OperationUtil {
             throw new UnsupportedOperationException();
         }
 
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) {
+            throw new UnsupportedOperationException();
+        }
+
         @Override
         public @NotNull Block read(@NotNull DataInput dataInput) throws IOException {
             int payload = dataInput.readInt();
@@ -145,6 +234,10 @@ public abstract class OperationUtil {
     public static final @NotNull OperationUtil BLOCK_END = new OperationUtil((byte) 0x06, BlockEnd.class, 8) {
         @Override
         void handleObserve(@NotNull Operation operation, @NotNull Connection connection) {
+            throw new UnsupportedOperationException();
+        }
+
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) {
             throw new UnsupportedOperationException();
         }
 
@@ -172,6 +265,38 @@ public abstract class OperationUtil {
         }
 
         @Override
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) throws IOException {
+            @Nullable ByteBuffer buffer = stream.getBuffer();
+            if (buffer == null) {
+                buffer = ByteBuffer.allocate(getHeaderLength() + 64);
+            }
+
+            if (stream.available() < getHeaderLength() + 1) {
+                return buffer;
+            }
+
+            if (buffer.position() == 0) {
+                buffer.putLong(stream.readLong()); // stream id
+                buffer.putShort(stream.readShort()); // error
+                buffer.putShort(stream.readShort()); // reason len
+            }
+
+            short len = buffer.getShort(9);
+            if (stream.available() < len) {
+                return buffer;
+            }
+
+            byte @NotNull [] bytes = new byte[len];
+            stream.readFully(bytes);
+
+            buffer.put(bytes);
+            buffer.flip();
+            stream.complete();
+
+            return buffer;
+        }
+
+        @Override
         public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
             long stream = dataInput.readLong();
             short error = dataInput.readShort();
@@ -181,7 +306,7 @@ public abstract class OperationUtil {
         }
     };
 
-    public static final @NotNull OperationUtil DONE = new OperationUtil((byte) 0x08, Done.class, 2) {
+    public static final @NotNull OperationUtil DONE = new OperationUtil((byte) 0x08, Done.class, 5 * 16) {
         @Override
         void handleObserve(@NotNull Operation operation, @NotNull Connection connection) throws ClassCastException {
             if (!(operation instanceof Done done)) {
@@ -200,9 +325,46 @@ public abstract class OperationUtil {
             }
         }
 
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) throws IOException {
+            @Nullable ByteBuffer buffer = stream.getBuffer();
+            short count = -1;
+            if (buffer == null) {
+                count = stream.readShort();
+                if (count > getHeaderLength() / 16) {
+                    throw new IllegalArgumentException("Done entry count is too long: " + count);
+                }
+
+                int header = Short.BYTES + (count * 16);
+                buffer = ByteBuffer.allocate(header);
+
+                buffer.putShort(count);
+            }
+
+            count = count == -1 ? buffer.getShort(0) : count;
+            if (stream.available() < buffer.remaining()) {
+                return buffer;
+            }
+
+            for (short i = 0; i < count; i++) {
+                buffer.putLong(stream.readLong()); // stream id
+                buffer.putInt(stream.readInt()); // start exec
+                buffer.putInt(stream.readInt()); // end exec
+            }
+
+            if (buffer.remaining() == 0) {
+                buffer.flip();
+                stream.complete();
+            }
+
+            return buffer;
+        }
+
         @Override
         public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
             short count = dataInput.readShort();
+            if (count > getHeaderLength() / 20) {
+                throw new UnsupportedOperationException("Done entry count is too long: " + count);
+            }
 
             @NotNull Done.Entry @NotNull [] entries = new Done.Entry[count];
             for (int i = 0; i < entries.length; i++) {
@@ -224,6 +386,11 @@ public abstract class OperationUtil {
         }
 
         @Override
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public @NotNull Operation read(@NotNull DataInput dataInput) throws IOException {
             return null;
         }
@@ -232,6 +399,11 @@ public abstract class OperationUtil {
     public static final @NotNull OperationUtil DISCONNECT = new OperationUtil((byte) 0x0A, Disconnect.class, 0) {
         @Override
         void handleObserve(@NotNull Operation operation, @NotNull Connection connection) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) throws IOException {
             throw new UnsupportedOperationException();
         }
 
@@ -301,7 +473,7 @@ public abstract class OperationUtil {
     }
 
     @Override
-    public String toString() {
+    public @NotNull String toString() {
         return getName();
     }
 
@@ -309,8 +481,11 @@ public abstract class OperationUtil {
 
     /**
      * @throws ClassCastException if operation is not a valid operation for this util
+     * @throws UnsupportedOperationException if this operation util is not observable
      * */
     abstract void handleObserve(@NotNull Operation operation, @NotNull Connection connection);
+
+    abstract @NotNull ByteBuffer readGlobal(@NotNull GlobalStream stream) throws IOException;
 
     /**
      * @throws UnsupportedOperationException if this operation util is not observable

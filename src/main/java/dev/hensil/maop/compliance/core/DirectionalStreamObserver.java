@@ -44,7 +44,7 @@ final class DirectionalStreamObserver {
         }
     }
 
-    synchronized void fireReading(long newBytes) {
+    void fireReading(long newBytes) {
         if (!isWaitReading()) {
             return;
         }
@@ -56,24 +56,24 @@ final class DirectionalStreamObserver {
         }
     }
 
-    synchronized boolean isWaitReading() {
+    boolean isWaitReading() {
         return readWaiter.getCount() > 0;
     }
 
-    private synchronized void setWaitReading(boolean waitReading) {
+    private void setWaitReading(boolean waitReading) {
         if (waitReading && !isWaitReading()) {
             this.readWaiter = new CountDownLatch(1);
         }
     }
 
-    private synchronized void resetReading() {
+    private void resetReading() {
         setWaitReading(false);
 
         this.untilAvailable = 0;
         this.count.set(0);
     }
 
-    synchronized void setUntilAvailable(long bytes) {
+    void setUntilAvailable(long bytes) {
         if (isWaitReading()) {
             throw new IllegalStateException("Already waiting for available bytes: " + untilAvailable);
         }
@@ -82,7 +82,7 @@ final class DirectionalStreamObserver {
         this.untilAvailable = bytes;
     }
 
-    public synchronized boolean awaitReading(int timeout, @NotNull TimeUnit unit) {
+    public boolean awaitReading(int timeout, @NotNull TimeUnit unit) {
         if (!isWaitReading()) {
             return false;
         }

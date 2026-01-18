@@ -1,13 +1,11 @@
 package dev.hensil.maop.compliance.model.operation;
 
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 
 import java.nio.ByteBuffer;
 
 public final class Response extends Operation {
 
-    private final byte @Nullable [] bytes;
     private final long payload;
     private final long start;
     private final int end;
@@ -17,7 +15,6 @@ public final class Response extends Operation {
         this.payload = payload;
         this.start = start;
         this.end = end;
-        this.bytes = null;
     }
 
     public long getPayload() {
@@ -35,8 +32,9 @@ public final class Response extends Operation {
     @Override
     public byte @NotNull [] toBytes() {
         return ByteBuffer.allocate(8 + 8 + 4)
-                .putLong(8)
-                .putInt(4)
+                .putLong(payload)
+                .putLong(start)
+                .putInt(end)
                 .array();
     }
 }

@@ -114,7 +114,7 @@ public sealed class Result permits Disapproved, Approved {
             return future.join();
         } catch (CompletionException e) {
             if (e.getCause() instanceof TimeoutException) {
-                throw new TimeoutException("Time out: " + timeout + " " + unit.name().toLowerCase());
+                throw new TimeoutException(timeout + " " + unit.name().toLowerCase());
             }
 
             if (e.getCause() instanceof IOException io) {

@@ -9,16 +9,18 @@ import dev.hensil.maop.compliance.model.operation.Operation;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import org.jetbrains.annotations.UnknownNullability;
 import tech.kwik.core.QuicStream;
 import tech.kwik.core.StreamReadListener;
+import tech.kwik.core.stream.NullStreamInputStream;
 import tech.kwik.core.stream.QuicStreamImpl;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 
+import java.io.InputStream;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Set;
 
 public final class GlobalStream extends BidirectionalStream {
@@ -49,6 +51,21 @@ public final class GlobalStream extends BidirectionalStream {
 
                     @NotNull Stack.Scope logScope = Stack.pushScope("Global stream listener")
             ) {
+                if (length == 0) {
+                    return;
+                }
+
+                {
+                    @UnknownNullability InputStream inputStream = quicStream.getInputStream();
+                    if (!(inputStream instanceof NullStreamInputStream)) try {
+                        if (inputStream.available() == 0) {
+                            return;
+                        }
+                    } catch (IOException ignore) {
+
+                    }
+                }
+
                 if (quicStream.isSelfInitiated()) {
                     @Nullable DirectionalStreamObserver observer = connection.getObserver(quicStream.getStreamId());
                     if (observer == null) {
@@ -56,7 +73,7 @@ public final class GlobalStream extends BidirectionalStream {
                     }
 
                     if (observer.isWaitReading()) {
-                        log.trace("Firing new readings in the Observer (stream = " + quicStream + ")");
+                        log.trace("Firing new readings in the Observer (stream = " + quicStream.getStreamId() + " & length = " + length + ")");
                         observer.fireReading(length);
                     }
 
@@ -67,7 +84,7 @@ public final class GlobalStream extends BidirectionalStream {
                     log.warn("Useless unidirectional stream created by peer: " + quicStream);
 
                     if (!connection.isClosed()) {
-                        log.trace("Reporting global policies (stream = " + quicStream + ")");
+                        log.trace("Reporting " + quicStream);
                         connection.reportGlobalPolicies();
 
                         try {
@@ -84,7 +101,7 @@ public final class GlobalStream extends BidirectionalStream {
                     log.warn("Illegal stream created by peer (stream id = " + quicStream.getStreamId() + "): Not authenticated connection");
 
                     if (!connection.isClosed()) {
-                        log.trace("Reporting global policies (stream = " + quicStream + ")");
+                        log.trace("Reporting " + quicStream);
                         connection.reportGlobalPolicies();
 
                         try {
@@ -95,10 +112,6 @@ public final class GlobalStream extends BidirectionalStream {
                         }
                     }
 
-                    return;
-                }
-
-                if (length == 0) {
                     return;
                 }
 
@@ -119,7 +132,7 @@ public final class GlobalStream extends BidirectionalStream {
                                 log.trace("I/O error occurred while trying to close an illegal bidirectional stream with id" + quicStream.getStreamId() + "): " + e);
                             }
 
-                            log.trace("Reporting global policies (stream = " + quicStream + ")");
+                            log.trace("Reporting " + quicStream);
                             connection.reportGlobalPolicies();
                         }
 
@@ -132,6 +145,7 @@ public final class GlobalStream extends BidirectionalStream {
                         }
 
                         log.debug("Number of potential global streams by the connection " + connection + ": " + streams.size());
+                        log.trace("Reading new operation from potential global stream with id " + bidirectionalStream.getId());
 
                         byte code = bidirectionalStream.readByte();
                         @Nullable OperationUtil utils = OperationUtil.getByCode(code);
@@ -152,12 +166,12 @@ public final class GlobalStream extends BidirectionalStream {
                         ) {
                             if (illegal) {
                                 if (utils == null) {
-                                    log.warn("Illegal operation read by Bidirectional Stream ( " + quicStream + ") with code: " + code);
+                                    log.trace("Illegal operation read by Bidirectional Stream ( " + quicStream + ") with code: " + code);
                                 } else {
-                                    log.warn("Would expect to read a global operation on a bidirectional stream (" + quicStream + ") but a " + utils + " operation was read");
+                                    log.trace("Would expect to read a Global operation on a bidirectional stream (" + quicStream + ") but a " + utils + " operation was read");
                                 }
 
-                                log.trace("Reporting global policies (stream = " + quicStream + ")");
+                                log.trace("Reporting " + quicStream);
                                 connection.reportGlobalPolicies();
 
                                 try {
@@ -173,32 +187,27 @@ public final class GlobalStream extends BidirectionalStream {
                             streams.remove(bidirectionalStream);
                             globalStream = new GlobalStream(connection, quicStream);
                             streams.add(globalStream);
-
-                            globalStream.pending(utils);
-
-                            long remaining = length - 1;
-                            if (remaining < utils.getHeaderLength()) {
-                                return;
-                            }
+                            log.trace("New Global stream (" + quicStream + ") was defined with " + length + " bytes available");
 
                             try {
-                                byte @NotNull [] bytes = new byte[utils.getHeaderLength()];
-                                int read = globalStream.read(bytes);
-                                if (read < bytes.length) {
-                                    bytes = Arrays.copyOf(bytes, read);
-                                }
+                                log.trace("New " + utils + " operation is pending to be completed");
+                                globalStream.pending(utils);
 
-                                globalStream.fill(bytes);
+                                if (globalStream.isComplete()) { // Finished
+                                    @Nullable ByteBuffer buffer = globalStream.getBuffer();
+                                    if (buffer == null) {
+                                        throw new AssertionError("Internal error");
+                                    }
 
-                                if (globalStream.remaining() == 0) { // Finished
-                                    @NotNull Operation operation = utils.read(new DataInputStream(new ByteArrayInputStream(bytes)));
+                                    @NotNull Operation operation = utils.read(new DataInputStream(new ByteArrayInputStream(buffer.array(), buffer.position(), buffer.limit())));
                                     log.trace("Successfully read operation on newbie global stream (" + quicStream + ") : " + operation);
                                     utils.handleObserve(operation, connection);
-                                    globalStream.setAsNonPendingOperation();
+                                    globalStream.resetAll();
                                 }
-
-                            } catch (RuntimeException e) {
-                                throw new AssertionError("Internal error", e);
+                            } catch (Throwable e) {
+                                log.severe("Fatal error occurs while read global operation operation: " + e.getMessage());
+                                log.debug().cause(e).log();
+                                shutdown(connection);
                             }
                         }
                     }
@@ -207,44 +216,41 @@ public final class GlobalStream extends BidirectionalStream {
 
                     else {
                         globalStream = (GlobalStream) bidirectionalStream;
+                        log.trace("Non newbie Global stream (" + quicStream + ") with " + globalStream.available() + " bytes available received");
 
                         if (globalStream.hasPendingOperation()) {
-                            @Nullable OperationUtil utils = globalStream.getPendingOperation();
-                            if (utils == null) {
+                            @Nullable OperationUtil util = globalStream.pendingOperation;
+                            @Nullable ByteBuffer buffer = globalStream.getBuffer();
+                            if (util == null || buffer == null) {
                                 throw new AssertionError("Internal error");
                             }
 
-                            if (length < globalStream.remaining()) {
-                                return;
-                            }
-
+                            log.trace("Trying to finish read " + util + " operation");
                             try (
                                     @NotNull LogCtx.Scope logContext2 = LogCtx.builder()
-                                            .put("operation code", utils.getCode())
-                                            .put("operation name", utils.getName())
-                                            .put("remaining", globalStream.remaining())
+                                            .put("operation code", util.getCode())
+                                            .put("buffer capacity", buffer.capacity())
                                             .install();
 
                                     @NotNull Stack.Scope logScope2 = Stack.pushScope("Read operation")
                             ) {
-                                byte @NotNull [] bytes = new byte[globalStream.remaining()];
-                                int read = globalStream.read(bytes);
-                                if (read < bytes.length) {
-                                    bytes = Arrays.copyOf(bytes, read);
-                                }
+                                globalStream.proceed();
 
-                                globalStream.fill(bytes);
-                                if (globalStream.remaining() == 0) {// Finished
-                                    @NotNull Operation operation = utils.read(new DataInputStream(new ByteArrayInputStream(bytes)));
-                                    log.trace("New operation read on global stream (" + quicStream + ") : " + operation);
+                                if (globalStream.isComplete()) {
+                                    log.trace(util + " operation ready to be complete on " + globalStream);
 
-                                    utils.handleObserve(operation, connection);
-                                    globalStream.setAsNonPendingOperation();
+                                    @NotNull Operation operation = util.read(new DataInputStream(new ByteArrayInputStream(buffer.array(), buffer.position(), buffer.limit())));
+                                    log.trace("Successfully read operation on the global stream (" + quicStream + ") : " + operation);
+                                    util.handleObserve(operation, connection);
+                                    globalStream.resetAll();
                                 }
-                            } catch (RuntimeException e) {
-                                throw new AssertionError("Internal error", e);
+                            } catch (Throwable e) {
+                                log.severe("Fatal error occurs while read global operation operation: " + e.getMessage());
+                                log.debug().cause(e).log();
                             }
                         } else {
+                            log.trace("Reading new operation from Global stream with id " + globalStream.getId());
+
                             byte code = globalStream.readByte();
                             @Nullable OperationUtil utils = OperationUtil.getByCode(code);
                             boolean illegal = utils == null || !utils.isGlobalOperation();
@@ -256,16 +262,16 @@ public final class GlobalStream extends BidirectionalStream {
 
                             if (illegal) {
                                 if (utils == null) {
-                                    log.warn("Illegal operation read by Bidirectional Stream ( " + quicStream + ") with code: " + code);
+                                    log.warn("Illegal operation read by Global Stream ( " + quicStream + ") with code: " + code);
                                 } else {
                                     log.warn("Would expect to read a global operation on a bidirectional stream (" + quicStream + ") but a " + utils + " operation was read");
                                 }
 
-                                log.trace("Reporting global policies (stream = " + quicStream + ")");
+                                log.trace("Reporting " + quicStream);
                                 connection.reportGlobalPolicies();
 
                                 try {
-                                    bidirectionalStream.close();
+                                    globalStream.close();
                                 } catch (IOException e) {
                                     log.trace("I/O error occurred while trying to close an illegal bidirectional stream with id" + bidirectionalStream.getId() + "): " + e);
                                 }
@@ -273,42 +279,43 @@ public final class GlobalStream extends BidirectionalStream {
                                 return;
                             }
 
-                            long remaining = length - 1;
-                            if (remaining < utils.getHeaderLength()) {
-                                return;
-                            }
-
                             try {
-                                byte @NotNull [] bytes = new byte[utils.getHeaderLength()];
-                                int read = globalStream.read(bytes);
-                                if (read < bytes.length) {
-                                    bytes = Arrays.copyOf(bytes, read);
-                                }
+                                log.trace("New " + utils + " operation is pending to be completed");
+                                globalStream.pending(utils);
 
-                                globalStream.fill(bytes);
+                                if (globalStream.isComplete()) {
+                                    log.trace(utils + " operation ready to be complete on " + globalStream);
 
-                                if (globalStream.remaining() == 0) { // Finished
-                                    @NotNull Operation operation = utils.read(new DataInputStream(new ByteArrayInputStream(bytes)));
-                                    log.trace("Successfully read operation on newbie global stream (" + quicStream + ") : " + operation);
+                                    @Nullable ByteBuffer buffer = globalStream.getBuffer();
+                                    if (buffer == null) {
+                                        throw new AssertionError("Internal error");
+                                    }
+
+                                    @NotNull Operation operation = utils.read(new DataInputStream(new ByteArrayInputStream(buffer.array(), buffer.position(), buffer.limit())));
+                                    log.trace("Successfully read operation on the global stream (" + quicStream + ") : " + operation);
                                     utils.handleObserve(operation, connection);
-                                    globalStream.setAsNonPendingOperation();
+                                    globalStream.resetAll();
                                 }
-
-                            } catch (RuntimeException e) {
-                                throw new AssertionError("Internal error", e);
+                            } catch (Throwable e) {
+                                log.severe("Fatal error occurs while read global operation operation: " + e.getMessage());
+                                log.debug().cause(e).log();
                             }
                         }
                     }
                 } catch (IOException e) {
                     if (!connection.isClosed()) {
-                        log.warn("I/O error in stream: " + e);
+                        log.trace("I/O error in stream: " + e);
 
                         if (globalStream != null) {
                             streams.remove(globalStream);
 
                             try {
                                 globalStream.close();
-                            } catch (IOException ignore) {}
+                            } catch (IOException ignore) {
+
+                            }
+
+                            return;
                         }
 
                         streams.remove(bidirectionalStream);
@@ -316,28 +323,13 @@ public final class GlobalStream extends BidirectionalStream {
                             bidirectionalStream.close();
                         } catch (IOException ignore) {}
                     }
+                } catch (UnsupportedOperationException e) {
+                    log.severe("Global stream read invalid operation: " + e.getMessage());
+                    shutdown(connection);
                 } catch (Throwable e) {
-                    log.severe("Unexpected fatal error: " + e.getMessage());
+                    log.severe("Unexpected error: " + e.getMessage());
                     log.debug().cause(e).log();
-
-                    if (!connection.isClosed()) {
-                        if (globalStream != null) {
-                            streams.remove(globalStream);
-
-                            try {
-                                globalStream.close();
-                            } catch (IOException ignore) {}
-                        }
-
-                        if (bidirectionalStream != null) {
-                            streams.remove(bidirectionalStream);
-                            try {
-                                bidirectionalStream.close();
-                            } catch (IOException ignore) {}
-                        }
-
-                        shutdown(connection);
-                    }
+                    shutdown(connection);
                 }
             }
         };
@@ -361,8 +353,9 @@ public final class GlobalStream extends BidirectionalStream {
 
     // Objects
 
+    private @Nullable OperationUtil pendingOperation;
     private @Nullable ByteBuffer buffer;
-    private @Nullable OperationUtil utils = null;
+    private boolean completed = false;
 
     GlobalStream(@NotNull Connection connection, @NotNull QuicStream stream) {
         super(connection, stream);
@@ -370,46 +363,37 @@ public final class GlobalStream extends BidirectionalStream {
 
     // Getters
 
+    @Nullable ByteBuffer getBuffer() {
+        return buffer;
+    }
+
     boolean hasPendingOperation() {
-        return utils != null;
+        return pendingOperation != null;
     }
 
-    int remaining() {
-        if (!hasPendingOperation()) {
-            throw new IllegalStateException("No pending operation");
-        }
-
-        if (buffer == null) {
-            return utils.getHeaderLength();
-        }
-
-        return utils.getHeaderLength() - buffer.position();
-    }
-
-    @Nullable OperationUtil getPendingOperation() {
-        return utils;
+    public boolean isComplete() {
+        return hasPendingOperation() && completed;
     }
 
     // Modules
 
-    void pending(@NotNull OperationUtil utils) {
-        this.utils = utils;
+    void pending(@NotNull OperationUtil util) throws IOException {
+        this.pendingOperation = util;
+        this.buffer = util.readGlobal(this);
     }
 
-    void fill(byte @NotNull [] bytes) {
-        if (!hasPendingOperation()) {
-            throw new IllegalStateException("No pending operation");
+    void proceed() throws IOException {
+        if (pendingOperation != null) {
+            this.buffer = pendingOperation.readGlobal(this);
         }
-
-        if (buffer == null) {
-            buffer = ByteBuffer.allocate(utils.getHeaderLength());
-        }
-
-        buffer.put(bytes, 0, buffer.limit());
     }
 
-    void setAsNonPendingOperation() {
+    void complete() {
+        this.completed = true;
+    }
+
+    void resetAll() {
+        this.pendingOperation = null;
         this.buffer = null;
-        this.utils = null;
     }
 }

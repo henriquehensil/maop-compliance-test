@@ -23,7 +23,7 @@ public final class Block extends Operation {
         return payload;
     }
 
-    public byte @NotNull [] getBytes() {
+    public byte @NotNull [] getContent() {
         return bytes;
     }
 

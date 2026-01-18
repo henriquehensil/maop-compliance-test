@@ -37,7 +37,7 @@ public final class Connection implements Closeable {
 
     private static final @NotNull Logger log = Logger.create("Connection").formatter(Main.FORMATTER);
     private static final int GLOBAL_STREAM_LIMIT = 2;
-    private static final int STREAM_CREATED_BY_PEER_LIMIT = 3;
+    private static final int SEVERE_BEHAVIORS_LIMITS = 3;
 
     private static void shutdown(@NotNull Connection connection) {
         if (connection.isClosed()) {
@@ -67,7 +67,7 @@ public final class Connection implements Closeable {
         this.put(UnidirectionalOutputStream.class, ConcurrentHashMap.newKeySet(16));
     }};
 
-    private final @NotNull AtomicInteger streamCreateCount = new AtomicInteger(0);
+    private final @NotNull AtomicInteger severeBehaviorCount = new AtomicInteger(0);
     private final @NotNull CompletableFuture<Void> polices = new CompletableFuture<>();
     private final @NotNull CountDownLatch disconnectionLatch = new CountDownLatch(1);
 
@@ -200,10 +200,16 @@ public final class Connection implements Closeable {
 
                 setAuthenticated((Approved) result);
                 log.trace(Coloured.of("Successfully authenticate connection (" + this + ")").color(Color.orange).print());
+
             } finally {
                 try {
                     stream.closeInput();
                 } catch (IOException ignore) {}
+
+                boolean removed = this.streams.get(BidirectionalStream.class).remove(stream);
+                if (!removed) {
+                    log.warn("Bidirectional stream used in authentication has not been removed from the streams list.");
+                }
             }
         }
     }
@@ -237,11 +243,11 @@ public final class Connection implements Closeable {
                 log.warn("The server takes " + elapsed + " to create a unidirectional stream");
             }
 
-            log.debug("Put stream (" + stream.getId() + ") as observable");
-            observe(stream);
-
             this.streams.get(UnidirectionalOutputStream.class).add(stream);
             log.trace("New unidirectional stream created by connection (" + this + ") with id: " + stream.getId());
+
+            log.debug("Put stream (" + stream.getId() + ") as observable");
+            observe(stream);
 
             return stream;
         } catch (CompletionException e) {
@@ -263,7 +269,7 @@ public final class Connection implements Closeable {
 
         CompletableFuture.runAsync(() -> {
             try {
-                future.complete(new BidirectionalStream(this, this.connection.createStream(false)));
+                future.complete(new BidirectionalStream(this, this.connection.createStream(true)));
             } catch (IOException e) {
                 future.completeExceptionally(e);
             }
@@ -276,7 +282,7 @@ public final class Connection implements Closeable {
 
                 @NotNull Stack.Scope logScope = Stack.pushScope("Create")
         ) {
-            log.trace(Coloured.of("Creating bidirectional output stream from connection (" + this + ")").color(Color.orange).print());
+            log.trace(Coloured.of("Creating bidirectional from connection (" + this + ")").color(Color.orange).print());
 
             @NotNull Elapsed elapsed = new Elapsed();
             @NotNull BidirectionalStream stream = future.join();
@@ -286,11 +292,11 @@ public final class Connection implements Closeable {
                 log.warn("The server takes " + elapsed + " to create a bidirectional stream");
             }
 
+            this.streams.get(BidirectionalStream.class).add(stream);
+            log.trace("New bidirectional stream created by connection (" + this + ") with id: " + stream.getId());
+
             log.debug("Put stream (" + stream.getId() + ") as observable");
             observe(stream);
-
-            this.streams.get(UnidirectionalOutputStream.class).add(stream);
-            log.trace("New bidirectional stream created by connection (" + this + ") with id: " + stream.getId());
 
             return stream;
         } catch (CompletionException e) {
@@ -325,12 +331,12 @@ public final class Connection implements Closeable {
     }
 
     @Blocking
-    public @NotNull Operation awaitOperation(@NotNull UnidirectionalOutputStream stream, int timeout, @NotNull TimeUnit timeUnit) throws IOException, TimeoutException, InterruptedException {
+    public @NotNull Operation awaitOperation(@NotNull UnidirectionalOutputStream stream, int timeout, @NotNull TimeUnit timeUnit) throws IOException, TimeoutException {
         return await0(stream, timeout, timeUnit);
     }
 
     @Blocking
-    public @NotNull Operation awaitOperation(@NotNull BidirectionalStream stream, int timeout, @NotNull TimeUnit timeUnit) throws IOException, TimeoutException, InterruptedException {
+    public @NotNull Operation awaitOperation(@NotNull BidirectionalStream stream, int timeout, @NotNull TimeUnit timeUnit) throws IOException, TimeoutException {
         return await0(stream, timeout, timeUnit);
     }
 
@@ -358,7 +364,7 @@ public final class Connection implements Closeable {
 
             boolean success = observer.awaitReading(timeout, unit);
             if (!success) {
-                throw new TimeoutException("Time out: " + timeout + " " + unit.name().toLowerCase());
+                throw new TimeoutException(timeout + " " + unit.name().toLowerCase());
             }
 
             available = stream.available();
@@ -367,7 +373,7 @@ public final class Connection implements Closeable {
             }
 
             return available;
-        } catch (Throwable e) {
+        } catch (IOException | IllegalStateException e) {
             throw new AssertionError("Internal error", e);
         }
     }
@@ -381,28 +387,46 @@ public final class Connection implements Closeable {
 
         @Nullable Operation operation = observer.awaitOperation(timeout, timeUnit);
         if (operation == null) {
-            throw new TimeoutException("Time out: " + timeout + " " + timeUnit.name().toLowerCase());
+            throw new TimeoutException(timeout + " " + timeUnit.name().toLowerCase());
         }
 
         return operation;
     }
 
     /**
-     * Help method to increase the stream counter and throws when polices limits are be exceeded.
+     * Help method to increase counter and throws when polices limits are be exceeded.
      * */
     void reportGlobalPolicies() {
-        this.streamCreateCount.incrementAndGet();
+        this.severeBehaviorCount.incrementAndGet();
+        int size = globalStreamSize();
 
-        log.debug("Stream count by connection ( " + this + " ) : " + streamCreateCount.get());
+        try (
+                @NotNull LogCtx.Scope logCtx = LogCtx.builder()
+                        .put("severe behaviour count", severeBehaviorCount.get())
+                        .put("exceeded", isLimitExceeded())
+                        .put("global stream size", size)
+                        .install();
 
-        if (isLimitExceeded()) {
-            this.polices.complete(null);
+                @NotNull Stack.Scope scope = Stack.pushScope("Policies")
+        ) {
+            log.debug("Severe behaviour count count by connection ( " + this + " ) : " + severeBehaviorCount.get());
+
+            if (isLimitExceeded()) {
+                @NotNull Throwable throwable = new Throwable(size > GLOBAL_STREAM_LIMIT ? "Global stream limit exceeded: " + size : " Severe behaviors exceeded: " + severeBehaviorCount);
+                this.polices.completeExceptionally(throwable);
+            }
         }
     }
 
+    private int globalStreamSize() {
+        return streams.get(BidirectionalStream.class).stream()
+                .filter(s -> s instanceof GlobalStream)
+                .toList()
+                .size();
+    }
+
     private boolean isLimitExceeded() {
-        return streamCreateCount.get() >= STREAM_CREATED_BY_PEER_LIMIT
-                || streams.get(BidirectionalStream.class).size() >= GLOBAL_STREAM_LIMIT;
+        return severeBehaviorCount.get() >= SEVERE_BEHAVIORS_LIMITS || globalStreamSize() >= GLOBAL_STREAM_LIMIT;
     }
 
     @Override

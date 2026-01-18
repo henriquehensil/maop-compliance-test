@@ -9,6 +9,7 @@ import tech.kwik.core.QuicStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Objects;
+import java.util.Set;
 
 public abstract class DirectionalStream implements Closeable {
 
@@ -39,7 +40,10 @@ public abstract class DirectionalStream implements Closeable {
     @Override
     @MustBeInvokedByOverriders
     public void close() throws IOException {
-        this.connection.getStreams().get(this.getClass()).remove(this);
+        @Nullable Set<DirectionalStream> stream = this.connection.getStreams().get(this.getClass());
+        if (stream != null) {
+            stream.remove(this);
+        }
     }
 
     // Native
